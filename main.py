@@ -362,4 +362,5 @@ async def ban_command(event):
         await event.reply("⚠️ Sahi format: `/ban <user_id>`")
 
 print("👑 Master Bot Initialized Successfully!")
+master_bot.start(bot_token=BOT_TOKEN)
 master_bot.run_until_disconnected()
