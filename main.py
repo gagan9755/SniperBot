@@ -229,7 +229,8 @@ def get_admin_buttons():
     return [
         [Button.inline("🔑 Gen 1 Key (30 Days)", b"adm_gen_1_30"), Button.inline("🔑 Gen 5 Keys (30 Days)", b"adm_gen_5_30")],
         [Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
-        [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🚫 Ban User", b"adm_ban_prompt")]
+        [Button.inline("👥 View Active Users", b"adm_users")],
+        [Button.inline("🚫 Ban User", b"adm_ban_prompt"), Button.inline("✅ Unban User", b"adm_unban_prompt")]
     ]
 
 # --- 💬 BOT CONVERSATION & LICENSE LOGIC ---
@@ -312,7 +313,11 @@ async def callback_handler(event):
             return
         elif data == "adm_ban_prompt":
             user_states[user_id] = 'WAITING_BAN_ID'
-            await event.edit("🚫 Jis user ko ban karna hai, uski **Telegram User ID** yahan type karke bhej do:", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            await event.edit("🚫 Jis user ko **BAN** karna hai, uski Telegram User ID yahan bhej do:", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif data == "adm_unban_prompt":
+            user_states[user_id] = 'WAITING_UNBAN_ID'
+            await event.edit("✅ Jis user ko **UNBAN** karna hai, uski Telegram User ID yahan bhej do:", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
         elif data == "adm_back":
             user_states[user_id] = None
@@ -435,7 +440,7 @@ async def handle_text(event):
     if text.startswith('/'):
         return
 
-    # 👑 MASTER ADMIN TEXT HANDLING (Ban User ID & Custom Key Input)
+    # 👑 MASTER ADMIN TEXT HANDLING (Ban, Unban & Custom Key Input)
     if user_id == MASTER_ID:
         state = user_states.get(user_id)
         if state == 'WAITING_BAN_ID':
@@ -446,11 +451,35 @@ async def handle_text(event):
                 if int(target_id) in active_snipers_dict:
                     active_snipers_dict[int(target_id)].is_running = False
                 user_states[user_id] = None
-                await event.reply(f"✅ User `{target_id}` ko successfully ban kar diya gaya hai!", buttons=[[Button.inline("🔙 Back to Admin Menu", b"adm_back")]])
+                await event.reply(f"✅ User `{target_id}` ko successfully BAN kar diya gaya hai!", buttons=[[Button.inline("🔙 Back to Admin Menu", b"adm_back")]])
             else:
                 await event.reply("❌ Ye user list me nahi mila. Dobara sahi ID bhejein.", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
             
+        elif state == 'WAITING_UNBAN_ID':
+            target_id = text
+            found_key = None
+            key_info = None
+            # Search if user had an active key previously
+            for k, info in license_db["keys"].items():
+                if str(info.get("used_by")) == target_id:
+                    found_key = k
+                    key_info = info
+                    break
+            
+            if found_key:
+                license_db["users"][target_id] = {
+                    "name": "Unbanned User",
+                    "key": found_key,
+                    "expires": key_info["expires"]
+                }
+                save_licenses(license_db)
+                user_states[user_id] = None
+                await event.reply(f"✅ User `{target_id}` ko successfully UNBAN kar diya gaya hai!\nWo apni purani key se direct continue kar sakte hain.", buttons=[[Button.inline("🔙 Back to Admin Menu", b"adm_back")]])
+            else:
+                await event.reply("❌ Is user ki koi purani key nahi mili. Kripya inhe nayi key generate karke dein.", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+
         elif state == 'WAITING_CUSTOM_KEY':
             try:
                 parts = text.lower().split()
