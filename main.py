@@ -73,14 +73,14 @@ def get_time_left(user_id):
     expires_dt = datetime.fromisoformat(expires_str)
     return expires_dt - datetime.now()
 
-# --- 🧠 USER SNIPER CLASS (Multiple Sources Support) ---
+# --- 🧠 USER SNIPER CLASS ---
 class UserSniper:
     def __init__(self, user_id, client, name, source_chat_ids=None):
         self.user_id = user_id
         self.client = client
         self.name = name
         self.destinations = {} 
-        self.source_chat_ids = source_chat_ids if source_chat_ids else [] # List of sources
+        self.source_chat_ids = source_chat_ids if source_chat_ids else []
         self.pinned_chats = set()
         self.is_running = True
         self.is_paused = False
@@ -194,7 +194,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         buttons=control_buttons
     )
 
-# Search helper
 async def search_and_send_channels(event, client, action_type, query=""):
     try:
         dialogs = await client.get_dialogs(limit=500)
@@ -219,8 +218,14 @@ async def search_and_send_channels(event, client, action_type, query=""):
 @master_bot.on(events.NewMessage(pattern='/start'))
 async def start_command(event):
     user_id = event.sender_id
+    
+    # 👑 MASTER ADMIN BUTTON PANEL
     if user_id == MASTER_ID:
-        await event.reply("👑 **MASTER ADMIN PANEL UNLOCKED!**\n\nCommands ke liye /help dekhein.")
+        admin_buttons = [
+            [Button.inline("🔑 Generate 5 Keys (30 Days)", b"adm_gen_5_30"), Button.inline("🔑 Generate 1 Key (30 Days)", b"adm_gen_1_30")],
+            [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🚫 Ban User", b"adm_ban_prompt")]
+        ]
+        await event.reply("👑 **MASTER ADMIN CONTROL PANEL** 👑\n\nApne kaam ke liye niche buttons me se select karein:", buttons=admin_buttons)
         return
         
     if is_user_authorized(user_id):
@@ -263,6 +268,45 @@ async def callback_handler(event):
     user_id = event.sender_id
     data = event.data.decode('utf-8') if isinstance(event.data, bytes) else event.data
     
+    # 👑 MASTER ADMIN ACTIONS
+    if user_id == MASTER_ID:
+        if data == "adm_gen_5_30":
+            generated = [f"`{generate_key(30)}`" for _ in range(5)]
+            await event.answer("5 Keys Generated!", alert=True)
+            await event.edit("✅ **5 New Keys Generated (30 Days Valid):**\n\n" + "\n".join(generated), buttons=[
+                [Button.inline("🔙 Back to Admin Menu", b"adm_back")]
+            ])
+            return
+        elif data == "adm_gen_1_30":
+            key = generate_key(30)
+            await event.answer("1 Key Generated!", alert=True)
+            await event.edit(f"✅ **1 New Key Generated (30 Days Valid):**\n\n`{key}`", buttons=[
+                [Button.inline("🔙 Back to Admin Menu", b"adm_back")]
+            ])
+            return
+        elif data == "adm_users":
+            if not license_db["users"]:
+                await event.answer("No active users!", alert=True)
+                return
+            msg = "👥 **Active Authorized Users:**\n\n"
+            for uid, info in license_db["users"].items():
+                expires = datetime.fromisoformat(info['expires']).strftime('%Y-%m-%d')
+                msg += f"👤 `{info['name']}` (ID: `{uid}`)\n   🔑 Key: `{info['key']}`\n   📅 Expiry: {expires}\n\n"
+            await event.edit(msg, buttons=[[Button.inline("🔙 Back to Admin Menu", b"adm_back")]])
+            return
+        elif data == "adm_ban_prompt":
+            user_states[user_id] = 'WAITING_BAN_ID'
+            await event.edit("🚫 Jis user ko ban karna hai, uski **Telegram User ID** yahan type karke bhej do:")
+            return
+        elif data == "adm_back":
+            admin_buttons = [
+                [Button.inline("🔑 Generate 5 Keys (30 Days)", b"adm_gen_5_30"), Button.inline("🔑 Generate 1 Key (30 Days)", b"adm_gen_1_30")],
+                [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🚫 Ban User", b"adm_ban_prompt")]
+            ]
+            await event.edit("👑 **MASTER ADMIN CONTROL PANEL** 👑\n\nApne kaam ke liye niche buttons me se select karein:", buttons=admin_buttons)
+            return
+
+    # User Control Panel Actions
     if data == "ctl_pause":
         if user_id in active_snipers_dict:
             active_snipers_dict[user_id].is_paused = True
@@ -305,7 +349,6 @@ async def callback_handler(event):
 
     elif data == "mode_pinned":
         user_states[user_id] = {'state': 'SELECT_DEST', 'source_mode': 'pinned', 'dest_list': []}
-        client = user_data.get(user_id, {}).get('client')
         await event.edit("📌 **Pinned Mode Selected.**\n\nAb apna **Destination Channel** search karne ke liye naam ya keyword type karke bhejein:")
 
     elif data == "mode_source":
@@ -357,7 +400,6 @@ async def callback_handler(event):
         )
 
     elif data == "more_dest":
-        client = user_data.get(user_id, {}).get('client')
         is_custom = user_data[user_id].get('source_list')
         action_prefix = "add_destcust" if is_custom else "add_dest"
         user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM' if is_custom else 'SELECT_DEST'}
@@ -377,6 +419,20 @@ async def handle_text(event):
     text = event.message.text.strip()
     
     if text.startswith('/'):
+        return
+
+    # Master Admin text handling (e.g. Ban User ID input)
+    if user_id == MASTER_ID and user_states.get(user_id) == 'WAITING_BAN_ID':
+        target_id = text
+        if target_id in license_db["users"]:
+            del license_db["users"][target_id]
+            save_licenses(license_db)
+            if int(target_id) in active_snipers_dict:
+                active_snipers_dict[int(target_id)].is_running = False
+            user_states[user_id] = None
+            await event.reply(f"✅ User `{target_id}` ko successfully ban kar diya gaya hai!")
+        else:
+            await event.reply("❌ Ye user list me nahi mila. Dobara sahi ID bhejein ya /start dabayein.")
         return
 
     state = user_states.get(user_id)
@@ -407,6 +463,9 @@ async def handle_text(event):
         client = user_data.get(user_id, {}).get('client')
         if client and client.is_connected():
             await search_and_send_channels(event, client, "add_source", query=text)
+        else:
+            user_states[user_id] = {'state': 'WAITING_PHONE_FOR_SOURCE', 'pending_source': text}
+            await event.reply("📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
 
     elif state in ['SELECT_DEST', 'SELECT_DEST_CUSTOM']:
         client = user_data.get(user_id, {}).get('client')
@@ -414,8 +473,11 @@ async def handle_text(event):
         action_prefix = "add_destcust" if is_custom else "add_dest"
         if client and client.is_connected():
             await search_and_send_channels(event, client, action_prefix, query=text)
+        else:
+            user_states[user_id] = {'state': 'WAITING_PHONE', 'pending_dest': text}
+            await event.reply("📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
 
-    elif state == 'WAITING_PHONE':
+    elif state in ['WAITING_PHONE', 'WAITING_PHONE_FOR_PINNED', 'WAITING_PHONE_FOR_SOURCE']:
         phone = text
         await event.reply("🔄 Connecting... Aapko Telegram par ek **OTP (Code)** aayega, kripya wo yahan bhejein:")
         user_states[user_id] = {'state': 'WAITING_OTP', 'phone': phone}
@@ -472,57 +534,6 @@ async def handle_text(event):
         except Exception as e:
             await event.reply(f"❌ Password galat hai ya error aayi: {e}\n/start dabakar fir se try karein.")
             user_states[user_id] = None
-
-@master_bot.on(events.NewMessage(pattern='/help'))
-async def help_command(event):
-    if event.sender_id != MASTER_ID:
-        await event.reply("🤖 Bot fully buttonized hai! /start dabakar control panel use karein.")
-        return
-    msg = ("👑 **MASTER ADMIN PANEL** 👑\n\n"
-           "`/addkey <count> <days>` - Naye PINs banayein\n"
-           "`/users` - Active users dekhein\n"
-           "`/ban <user_id>` - User ban karein")
-    await event.reply(msg)
-
-@master_bot.on(events.NewMessage(pattern='/addkey'))
-async def addkey_command(event):
-    if event.sender_id != MASTER_ID: return
-    try:
-        args = event.message.text.split()
-        count = int(args[1])
-        days = int(args[2]) if len(args) > 2 else 30
-        generated = [f"`{generate_key(days)}`" for _ in range(count)]
-        await event.reply(f"✅ **{count} New Keys Generated:**\n\n" + "\n".join(generated))
-    except (ValueError, IndexError):
-        await event.reply("⚠️ Format: `/addkey 5 30`")
-
-@master_bot.on(events.NewMessage(pattern='/users'))
-async def users_command(event):
-    if event.sender_id != MASTER_ID: return
-    if not license_db["users"]:
-        await event.reply("⚠️ Koi active user nahi hai.")
-        return
-    msg = "👥 **Active Users:**\n\n"
-    for uid, info in license_db["users"].items():
-        expires = datetime.fromisoformat(info['expires']).strftime('%Y-%m-%d')
-        msg += f"👤 `{info['name']}` (ID: `{uid}`)\n   🔑 Key: `{info['key']}`\n   📅 Expiry: {expires}\n\n"
-    await event.reply(msg)
-
-@master_bot.on(events.NewMessage(pattern='/ban'))
-async def ban_command(event):
-    if event.sender_id != MASTER_ID: return
-    try:
-        target_id = event.message.text.split()[1]
-        if target_id in license_db["users"]:
-            del license_db["users"][target_id]
-            save_licenses(license_db)
-            if int(target_id) in active_snipers_dict:
-                active_snipers_dict[int(target_id)].is_running = False
-            await event.reply(f"✅ User `{target_id}` ko ban kar diya gaya hai!")
-        else:
-            await event.reply("❌ User nahi mila.")
-    except IndexError:
-        await event.reply("⚠️ Format: `/ban <user_id>`")
 
 print("👑 Master Bot Initialized Successfully!")
 master_bot.start(bot_token=BOT_TOKEN)
