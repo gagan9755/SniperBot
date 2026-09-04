@@ -5,7 +5,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, types, Button
 from telethon.tl.types import MessageEntityCode, MessageEntityPre
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import SessionPasswordNeededError, FloodWaitError
 from flask import Flask
 from threading import Thread
 import json
@@ -73,14 +73,14 @@ def get_time_left(user_id):
     expires_dt = datetime.fromisoformat(expires_str)
     return expires_dt - datetime.now()
 
-# --- 🧠 USER SNIPER CLASS ---
+# --- 🧠 USER SNIPER CLASS (Multiple Sources Support) ---
 class UserSniper:
-    def __init__(self, user_id, client, name, source_chat_id=None):
+    def __init__(self, user_id, client, name, source_chat_ids=None):
         self.user_id = user_id
         self.client = client
         self.name = name
         self.destinations = {} 
-        self.source_chat_id = source_chat_id 
+        self.source_chat_ids = source_chat_ids if source_chat_ids else [] # List of sources
         self.pinned_chats = set()
         self.is_running = True
         self.is_paused = False
@@ -91,7 +91,7 @@ class UserSniper:
         self.seen_codes_queue = deque(maxlen=100)
         
     async def update_pinned_loop(self):
-        if self.source_chat_id:
+        if self.source_chat_ids:
             return
         while self.is_running:
             try:
@@ -108,26 +108,22 @@ async def fast_send(client, target_entity, final_msg, start_time, user_id):
     except Exception as e:
         pass
 
-async def start_sniper_for_user(user_id, client, dest_chat, name, source_chat_id=None):
+async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None):
     if user_id in active_snipers_dict:
         active_snipers_dict[user_id].is_running = False
 
-    sniper = UserSniper(user_id, client, name, source_chat_id)
+    sniper = UserSniper(user_id, client, name, source_chat_ids)
     
-    try:
-        target_entity = await client.get_entity(dest_chat)
-        sniper.destinations[dest_chat] = target_entity
-    except Exception as e:
-        await master_bot.send_message(user_id, f"❌ Error: Destination ID galat hai ya aapne wo channel join nahi kiya hai.")
-        return
-
-    if source_chat_id:
+    for d_chat in dest_chats:
         try:
-            source_entity = await client.get_entity(source_chat_id)
-            sniper.source_chat_id = source_entity.id
+            target_entity = await client.get_entity(d_chat)
+            sniper.destinations[d_chat] = target_entity
         except Exception as e:
-            await master_bot.send_message(user_id, f"❌ Error: Source Channel ID galat hai!")
-            return
+            pass
+
+    if not sniper.destinations:
+        await master_bot.send_message(user_id, f"❌ Error: Koi bhi valid destination channel nahi mila.")
+        return
 
     active_snipers_dict[user_id] = sniper
     asyncio.create_task(sniper.update_pinned_loop())
@@ -140,8 +136,8 @@ async def start_sniper_for_user(user_id, client, dest_chat, name, source_chat_id
         if sniper.is_paused or not sniper.destinations:
             return
             
-        if sniper.source_chat_id:
-            if event.chat_id != sniper.source_chat_id:
+        if sniper.source_chat_ids:
+            if event.chat_id not in sniper.source_chat_ids:
                 return
         else:
             if event.chat_id not in sniper.pinned_chats:
@@ -184,22 +180,21 @@ async def start_sniper_for_user(user_id, client, dest_chat, name, source_chat_id
         for d_id, target in sniper.destinations.items():
             asyncio.create_task(fast_send(client, target, final_msg, start_time, user_id))
 
-    # Calculate days left for expiry display
     time_left = get_time_left(user_id)
     days_left = time_left.days if time_left else 0
-
+    mode_text = f"Multiple Sources ({len(source_chat_ids)})" if source_chat_ids else "Auto Pinned Chats"
+    
     control_buttons = [
         [Button.inline("🔴 Pause Bot", b"ctl_pause"), Button.inline("🟢 Resume Bot", b"ctl_run")],
         [Button.inline(f"⏳ Expiry: {days_left} Days Left", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")]
     ]
-    mode_text = f"Specific Source (`{sniper.source_chat_id}`)" if source_chat_id else "Auto Pinned Chats"
     await master_bot.send_message(
         user_id, 
-        f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Mode:** {mode_text}\n🚀 **Targets:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{days_left} Days Remaining`", 
+        f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Mode:** {mode_text}\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{days_left} Days Remaining`", 
         buttons=control_buttons
     )
 
-# Helper to search and send channels with query
+# Search helper
 async def search_and_send_channels(event, client, action_type, query=""):
     try:
         dialogs = await client.get_dialogs(limit=500)
@@ -216,7 +211,7 @@ async def search_and_send_channels(event, client, action_type, query=""):
             await event.respond(f"❌ '{query}' naam se koi channel nahi mila. Sahi naam likh kar dobara try karein.")
             return
             
-        await event.respond(f"🔍 **Matching Channels (Total found: {len(buttons)})**\nNiche tap karke select karein:", buttons=buttons)
+        await event.respond(f"🔍 **Matching Channels:**\nNiche tap karke select karein:", buttons=buttons)
     except Exception as e:
         await event.respond(f"❌ Channels search karne me error aayi: {e}")
 
@@ -243,14 +238,19 @@ async def start_command(event):
                 await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{days_left} Days Remaining`\nApna bot control karne ke liye niche buttons use karein:", buttons=control_buttons)
                 return
 
-            user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(
-                f"✅ **Welcome Back!** (⏳ `{days_left} Days Left`)\n\n🎯 Apne kaam ke liye **Sniper Mode** select karein:",
-                buttons=[
-                    [Button.inline("📌 Auto Pinned Chats Mode", b"mode_pinned")],
-                    [Button.inline("🎯 Specific Source Channel (No Pin)", b"mode_source")]
-                ]
-            )
+            client = user_data.get(user_id, {}).get('client')
+            if client and client.is_connected():
+                user_states[user_id] = 'CHOOSE_MODE'
+                await event.reply(
+                    f"✅ **Welcome Back!** (⏳ `{days_left} Days Left`)\n\n🎯 Apne kaam ke liye **Sniper Mode** select karein:",
+                    buttons=[
+                        [Button.inline("📌 Auto Pinned Chats Mode", b"mode_pinned")],
+                        [Button.inline("🎯 Specific Source Channel (No Pin)", b"mode_source")]
+                    ]
+                )
+            else:
+                user_states[user_id] = 'WAITING_PHONE'
+                await event.reply(f"✅ **Welcome Back!** (⏳ `{days_left} Days Left`)\n\n📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
         else:
             await event.reply("⚠️ **Aapki Key Expire ho chuki hai!** Nayi key ke liye Admin se contact karein.")
         return
@@ -269,7 +269,7 @@ async def callback_handler(event):
             time_left = get_time_left(user_id)
             days_left = time_left.days if time_left else 0
             await event.answer("🔴 Bot Paused Successfully!", alert=True)
-            await event.edit(f"🟡 **BOT IS PAUSED (OFF)**\n\n⏳ **Validity:** `{days_left} Days Remaining`\nDobara chalu karne ke liye button dabayein:", buttons=[
+            await event.edit(f"🟡 **BOT IS PAUSED (OFF)**\n\n⏳ **Validity:** `{days_left} Days Remaining`", buttons=[
                 [Button.inline("🟢 Resume Bot", b"ctl_run"), Button.inline(f"⏳ Expiry: {days_left} Days", b"ctl_mykey")],
                 [Button.inline("🔄 Restart Setup", b"ctl_restart")]
             ])
@@ -279,7 +279,7 @@ async def callback_handler(event):
             time_left = get_time_left(user_id)
             days_left = time_left.days if time_left else 0
             await event.answer("🟢 Bot Resumed!", alert=True)
-            await event.edit(f"🟢 **BOT IS ON**\n\n⏳ **Validity:** `{days_left} Days Remaining`\nCodes aana shuru ho gaye hain:", buttons=[
+            await event.edit(f"🟢 **BOT IS ON**\n\n⏳ **Validity:** `{days_left} Days Remaining`", buttons=[
                 [Button.inline("🔴 Pause Bot", b"ctl_pause"), Button.inline(f"⏳ Expiry: {days_left} Days", b"ctl_mykey")],
                 [Button.inline("🔄 Restart Setup", b"ctl_restart")]
             ])
@@ -304,40 +304,72 @@ async def callback_handler(event):
         )
 
     elif data == "mode_pinned":
-        user_states[user_id] = {'state': 'SELECT_DEST', 'source_mode': 'pinned'}
+        user_states[user_id] = {'state': 'SELECT_DEST', 'source_mode': 'pinned', 'dest_list': []}
         client = user_data.get(user_id, {}).get('client')
-        if client and client.is_connected():
-            await event.edit("📌 **Pinned Mode Selected.**\n\nAb apna **Destination Channel** search karne ke liye channel ka naam ya keyword type karke bhejein:")
-        else:
-            user_states[user_id] = {'state': 'WAITING_PHONE_FOR_PINNED', 'source_mode': 'pinned'}
-            await event.edit("📌 **Pinned Mode Selected.**\n\n📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
+        await event.edit("📌 **Pinned Mode Selected.**\n\nAb apna **Destination Channel** search karne ke liye naam ya keyword type karke bhejein:")
 
     elif data == "mode_source":
-        user_states[user_id] = {'state': 'SELECT_SOURCE_SEARCH'}
-        client = user_data.get(user_id, {}).get('client')
-        if client and client.is_connected():
-            await event.edit("🎯 **Specific Source Mode Selected.**\n\nAb apne **Source Channel** ka naam ya keyword type karke bhejein jisse bot use dhoondh sake:")
-        else:
-            user_states[user_id] = {'state': 'WAITING_PHONE_FOR_SOURCE'}
-            await event.edit("🎯 **Specific Source Mode Selected.**\n\n📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
+        user_states[user_id] = {'state': 'SELECT_SOURCES', 'source_list': []}
+        await event.edit("🎯 **Specific Source Mode Selected.**\n\nAb apne **Source Channel** ka naam ya keyword type karke bhejein (Aap ek se zyada source add kar sakte hain):")
 
-    elif data.startswith("source:"):
-        source_chat = int(data.split(":")[1])
-        user_data[user_id]['source_chat'] = source_chat
-        user_states[user_id] = {'state': 'SELECT_DEST_SEARCH'}
-        await event.edit("✅ Source Channel select ho gaya!\n\nAb apne **Destination Channel** ka naam ya keyword type karke bhejein:")
-
-    elif data.startswith("dest:") or data.startswith("destcust:"):
-        dest_chat = int(data.split(":")[1])
-        user_data[user_id]['dest'] = dest_chat
+    elif data.startswith("add_source:"):
+        source_id = int(data.split(":")[1])
+        if user_id not in user_data: user_data[user_id] = {}
+        if 'source_list' not in user_data[user_id]: user_data[user_id]['source_list'] = []
         
+        if source_id not in user_data[user_id]['source_list']:
+            user_data[user_id]['source_list'].append(source_id)
+            
+        count = len(user_data[user_id]['source_list'])
+        await event.answer(f"Source added! Total: {count}", alert=True)
+        await event.edit(
+            f"✅ **Source Added Successfully! (Total: {count})**\n\nKya aap aur source add karna chahte hain ya destination select karein?",
+            buttons=[
+                [Button.inline("➕ Add More Source", b"more_source")],
+                [Button.inline("🎯 Done, Select Destination", b"done_sources")]
+            ]
+        )
+
+    elif data == "more_source":
+        user_states[user_id] = {'state': 'SELECT_SOURCES'}
+        await event.edit("🎯 Agle **Source Channel** ka naam ya keyword type karke bhejein:")
+
+    elif data == "done_sources":
+        user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM', 'dest_list': []}
+        await event.edit("🎯 **Sources Saved!**\n\nAb apna **Destination Channel** search karne ke liye naam ya keyword type karke bhejein:")
+
+    elif data.startswith("add_dest:") or data.startswith("add_destcust:"):
+        dest_id = int(data.split(":")[1])
+        if user_id not in user_data: user_data[user_id] = {}
+        if 'dest_list' not in user_data[user_id]: user_data[user_id]['dest_list'] = []
+        
+        if dest_id not in user_data[user_id]['dest_list']:
+            user_data[user_id]['dest_list'].append(dest_id)
+            
+        count = len(user_data[user_id]['dest_list'])
+        await event.answer(f"Destination added! Total: {count}", alert=True)
+        await event.edit(
+            f"✅ **Destination Added! (Total: {count})**\n\nKya aur destination add karni hai ya sniper start karein?",
+            buttons=[
+                [Button.inline("➕ Add More Destination", b"more_dest")],
+                [Button.inline("🚀 Start Sniper Bot Now", b"start_sniper_final")]
+            ]
+        )
+
+    elif data == "more_dest":
         client = user_data.get(user_id, {}).get('client')
-        if client and client.is_connected():
-            await event.edit("✅ Setup Complete! Sniper start ho raha hai...")
-            await start_sniper_for_user(user_id, client, dest_chat, "User", user_data[user_id].get('source_chat'))
-        else:
-            user_states[user_id] = {'state': 'WAITING_PHONE'}
-            await event.edit("✅ Destination select ho gayi!\n\n📱 Ab apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
+        is_custom = user_data[user_id].get('source_list')
+        action_prefix = "add_destcust" if is_custom else "add_dest"
+        user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM' if is_custom else 'SELECT_DEST'}
+        await event.edit("🎯 Agle **Destination Channel** ka naam ya keyword type karke bhejein:")
+
+    elif data == "start_sniper_final":
+        client = user_data.get(user_id, {}).get('client')
+        dest_list = user_data[user_id].get('dest_list', [])
+        source_list = user_data[user_id].get('source_list', [])
+        
+        await event.edit("🚀 **Sniper Bot Start ho raha hai...**")
+        await start_sniper_for_user(user_id, client, dest_list, "User", source_list if source_list else None)
 
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
@@ -366,29 +398,24 @@ async def handle_text(event):
             
             time_left = get_time_left(user_id)
             days_left = time_left.days if time_left else 0
-            user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(
-                f"✅ **Key Verified Successfully!** 🎉 (⏳ `{days_left} Days Left`)\n\n🎯 Apne kaam ke liye **Sniper Mode** select karein:",
-                buttons=[
-                    [Button.inline("📌 Auto Pinned Chats Mode", b"mode_pinned")],
-                    [Button.inline("🎯 Specific Source Channel (No Pin)", b"mode_source")]
-                ]
-            )
+            user_states[user_id] = 'WAITING_PHONE'
+            await event.reply(f"✅ **Key Verified!** (⏳ `{days_left} Days Left`)\n\n📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
         else:
             await event.reply("❌ **Invalid Key!** Sahi key enter karein ya Admin se contact karein.")
 
-    elif state == 'SELECT_SOURCE_SEARCH':
+    elif state == 'SELECT_SOURCES':
         client = user_data.get(user_id, {}).get('client')
         if client and client.is_connected():
-            await search_and_send_channels(event, client, "source", query=text)
+            await search_and_send_channels(event, client, "add_source", query=text)
 
-    elif state in ['SELECT_DEST', 'SELECT_DEST_SEARCH']:
+    elif state in ['SELECT_DEST', 'SELECT_DEST_CUSTOM']:
         client = user_data.get(user_id, {}).get('client')
-        action_prefix = "destcust" if state == 'SELECT_DEST_SEARCH' else "dest"
+        is_custom = user_data[user_id].get('source_list')
+        action_prefix = "add_destcust" if is_custom else "add_dest"
         if client and client.is_connected():
             await search_and_send_channels(event, client, action_prefix, query=text)
 
-    elif state in ['WAITING_PHONE', 'WAITING_PHONE_FOR_PINNED', 'WAITING_PHONE_FOR_SOURCE']:
+    elif state == 'WAITING_PHONE':
         phone = text
         await event.reply("🔄 Connecting... Aapko Telegram par ek **OTP (Code)** aayega, kripya wo yahan bhejein:")
         user_states[user_id] = {'state': 'WAITING_OTP', 'phone': phone}
@@ -400,6 +427,9 @@ async def handle_text(event):
             if user_id not in user_data: user_data[user_id] = {}
             user_data[user_id]['client'] = client
             user_data[user_id]['phone_code_hash'] = sent.phone_code_hash
+        except FloodWaitError as e:
+            await event.reply(f"⚠️ Telegram ne FloodWait lagaya hai! Kripya {e.seconds} seconds baad try karein.")
+            user_states[user_id] = None
         except Exception as e:
             await event.reply(f"❌ Error: {e}\n/start dabakar fir se koshish karein.")
             user_states[user_id] = None
@@ -415,7 +445,7 @@ async def handle_text(event):
             time_left = get_time_left(user_id)
             days_left = time_left.days if time_left else 0
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(f"✅ Login Successful! (⏳ `{days_left} Days Left`)\n\nAb apna **Sniper Mode** select karein:", buttons=[
+            await event.reply(f"✅ Login Successful! (⏳ `{days_left} Days Left`)\n\n🎯 Ab apna **Sniper Mode** select karein:", buttons=[
                 [Button.inline("📌 Auto Pinned Chats Mode", b"mode_pinned")],
                 [Button.inline("🎯 Specific Source Channel (No Pin)", b"mode_source")]
             ])
@@ -435,7 +465,7 @@ async def handle_text(event):
             time_left = get_time_left(user_id)
             days_left = time_left.days if time_left else 0
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(f"✅ Password Verified! (⏳ `{days_left} Days Left`)\n\nAb apna **Sniper Mode** select karein:", buttons=[
+            await event.reply(f"✅ Password Verified! (⏳ `{days_left} Days Left`)\n\n🎯 Ab apna **Sniper Mode** select karein:", buttons=[
                 [Button.inline("📌 Auto Pinned Chats Mode", b"mode_pinned")],
                 [Button.inline("🎯 Specific Source Channel (No Pin)", b"mode_source")]
             ])
@@ -449,9 +479,9 @@ async def help_command(event):
         await event.reply("🤖 Bot fully buttonized hai! /start dabakar control panel use karein.")
         return
     msg = ("👑 **MASTER ADMIN PANEL** 👑\n\n"
-           "`/addkey <count> <days>` - Naye PINs banayein (Example: `/addkey 5 30`)\n"
-           "`/users` - Active users aur unke names dekhein\n"
-           "`/ban <user_id>` - User ka access khatam karein")
+           "`/addkey <count> <days>` - Naye PINs banayein\n"
+           "`/users` - Active users dekhein\n"
+           "`/ban <user_id>` - User ban karein")
     await event.reply(msg)
 
 @master_bot.on(events.NewMessage(pattern='/addkey'))
@@ -462,9 +492,9 @@ async def addkey_command(event):
         count = int(args[1])
         days = int(args[2]) if len(args) > 2 else 30
         generated = [f"`{generate_key(days)}`" for _ in range(count)]
-        await event.reply(f"✅ **{count} New Keys Generated ({days} Days Valid):**\n\n" + "\n".join(generated))
+        await event.reply(f"✅ **{count} New Keys Generated:**\n\n" + "\n".join(generated))
     except (ValueError, IndexError):
-        await event.reply("⚠️ Sahi format use karein. Example: `/addkey 5 30`")
+        await event.reply("⚠️ Format: `/addkey 5 30`")
 
 @master_bot.on(events.NewMessage(pattern='/users'))
 async def users_command(event):
@@ -472,7 +502,7 @@ async def users_command(event):
     if not license_db["users"]:
         await event.reply("⚠️ Koi active user nahi hai.")
         return
-    msg = "👥 **Active Authorized Users:**\n\n"
+    msg = "👥 **Active Users:**\n\n"
     for uid, info in license_db["users"].items():
         expires = datetime.fromisoformat(info['expires']).strftime('%Y-%m-%d')
         msg += f"👤 `{info['name']}` (ID: `{uid}`)\n   🔑 Key: `{info['key']}`\n   📅 Expiry: {expires}\n\n"
@@ -488,11 +518,11 @@ async def ban_command(event):
             save_licenses(license_db)
             if int(target_id) in active_snipers_dict:
                 active_snipers_dict[int(target_id)].is_running = False
-            await event.reply(f"✅ User `{target_id}` ko successfully ban kar diya gaya hai!")
+            await event.reply(f"✅ User `{target_id}` ko ban kar diya gaya hai!")
         else:
-            await event.reply("❌ Ye user list me nahi mila.")
+            await event.reply("❌ User nahi mila.")
     except IndexError:
-        await event.reply("⚠️ Sahi format: `/ban <user_id>`")
+        await event.reply("⚠️ Format: `/ban <user_id>`")
 
 print("👑 Master Bot Initialized Successfully!")
 master_bot.start(bot_token=BOT_TOKEN)
