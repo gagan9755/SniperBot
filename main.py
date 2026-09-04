@@ -205,6 +205,36 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         buttons=control_buttons
     )
 
+# --- 🚀 DIRECT CHANNEL BUTTONS GENERATOR ---
+async def get_channel_buttons(client, action_type, require_admin=False, pinned_only=False):
+    try:
+        dialogs = await client.get_dialogs(limit=200)
+        buttons = []
+        for d in dialogs:
+            if pinned_only and not d.pinned:
+                continue
+                
+            if d.is_channel or d.is_group:
+                if require_admin:
+                    is_admin = False
+                    if getattr(d.entity, 'creator', False):
+                        is_admin = True
+                    elif getattr(d.entity, 'admin_rights', None):
+                        is_admin = True
+                    if not is_admin:
+                        continue
+                
+                name = d.name[:25] if d.name else "Unnamed"
+                buttons.append([Button.inline(name, data=f"{action_type}:{d.id}")])
+                
+                if len(buttons) >= 80: 
+                    break
+        return buttons
+    except Exception as e:
+        print(f"Error fetching dialogs: {e}")
+        return []
+
+# Helper for fallback search
 async def search_and_send_channels(event, client, action_type, query=""):
     try:
         dialogs = await client.get_dialogs(limit=500)
@@ -216,14 +246,12 @@ async def search_and_send_channels(event, client, action_type, query=""):
                     buttons.append([Button.inline(name[:28], data=f"{action_type}:{d.id}")])
                     if len(buttons) >= 15:
                         break
-        
         if not buttons:
             await event.respond(f"❌ '{query}' naam se koi channel nahi mila. Sahi naam likh kar dobara try karein.")
             return
-            
         await event.respond(f"🔍 **Matching Channels:**\nNiche tap karke select karein:", buttons=buttons)
     except Exception as e:
-        await event.respond(f"❌ Channels search karne me error aayi: {e}")
+        await event.respond(f"❌ Channels search error: {e}")
 
 def get_admin_buttons():
     return [
@@ -238,9 +266,8 @@ def get_admin_buttons():
 async def start_command(event):
     user_id = event.sender_id
     
-    # 👑 MASTER ADMIN BUTTON PANEL
     if user_id == MASTER_ID:
-        user_states[user_id] = None # Clear any pending states
+        user_states[user_id] = None 
         await event.reply("👑 **MASTER ADMIN CONTROL PANEL** 👑\n\nApne kaam ke liye niche buttons me se select karein:", buttons=get_admin_buttons())
         return
         
@@ -256,7 +283,7 @@ async def start_command(event):
                     [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")]
                 ]
                 status_txt = "🟢 **BOT IS ON**" if not sniper.is_paused else "🟡 **BOT IS PAUSED**"
-                await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke liye niche buttons use karein:", buttons=control_buttons)
+                await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke niche buttons use karein:", buttons=control_buttons)
                 return
 
             client = user_data.get(user_id, {}).get('client')
@@ -366,13 +393,29 @@ async def callback_handler(event):
             ]
         )
 
+    # DIRECT CHANNEL SELECTION WITH INLINE BUTTONS (NO SEARCH NEEDED)
     elif data == "mode_pinned":
         user_states[user_id] = {'state': 'SELECT_DEST', 'source_mode': 'pinned', 'dest_list': []}
-        await event.edit("📌 **Pinned Mode Selected.**\n\nAb apna **Destination Channel** search karne ke liye naam ya keyword type karke bhejein:")
+        client = user_data.get(user_id, {}).get('client')
+        if client and client.is_connected():
+            buttons = await get_channel_buttons(client, "add_dest", require_admin=True, pinned_only=False)
+            msg = "📌 **Pinned Mode:**\n\n🎯 Niche aapke **Admin Channels** ki list hai. Apna Destination select karein:"
+            if not buttons: msg += "\n*(Agar list me naam na aaye toh aap channel ka naam type kar sakte hain)*"
+            await event.edit(msg, buttons=buttons)
+        else:
+            await event.edit("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif data == "mode_source":
         user_states[user_id] = {'state': 'SELECT_SOURCES', 'source_list': []}
-        await event.edit("🎯 **Specific Source Mode Selected.**\n\nAb apne **Source Channel** ka naam ya keyword type karke bhejein (Aap ek se zyada source add kar sakte hain):")
+        client = user_data.get(user_id, {}).get('client')
+        if client and client.is_connected():
+            # SPECIFIC SOURCE MODE: ONLY FETCH PINNED CHATS
+            buttons = await get_channel_buttons(client, "add_source", require_admin=False, pinned_only=True)
+            msg = "🎯 **Specific Source Mode:**\n\n📥 Niche aapke **PINNED Channels/Groups** ki list hai. Apna Source select karein:"
+            if not buttons: msg += "\n*(Aapne koi channel pin nahi kiya hai, ya fetch nahi hua. Kripya channel ka naam type karein)*"
+            await event.edit(msg, buttons=buttons)
+        else:
+            await event.edit("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif data.startswith("add_source:"):
         source_id = int(data.split(":")[1])
@@ -387,18 +430,22 @@ async def callback_handler(event):
         await event.edit(
             f"✅ **Source Added Successfully! (Total: {count})**\n\nKya aap aur source add karna chahte hain ya destination select karein?",
             buttons=[
-                [Button.inline("➕ Add More Source", b"more_source")],
+                [Button.inline("➕ Add More Pinned Source", b"more_source")],
                 [Button.inline("🎯 Done, Select Destination", b"done_sources")]
             ]
         )
 
     elif data == "more_source":
         user_states[user_id] = {'state': 'SELECT_SOURCES'}
-        await event.edit("🎯 Agle **Source Channel** ka naam ya keyword type karke bhejein:")
+        client = user_data.get(user_id, {}).get('client')
+        buttons = await get_channel_buttons(client, "add_source", require_admin=False, pinned_only=True)
+        await event.edit("🎯 Niche list me se apna agla **PINNED Source Channel** select karein:", buttons=buttons)
 
     elif data == "done_sources":
         user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM', 'dest_list': []}
-        await event.edit("🎯 **Sources Saved!**\n\nAb apna **Destination Channel** search karne ke liye naam ya keyword type karke bhejein:")
+        client = user_data.get(user_id, {}).get('client')
+        buttons = await get_channel_buttons(client, "add_destcust", require_admin=True, pinned_only=False)
+        await event.edit("🎯 **Sources Saved!**\n\nAb niche apne **Admin Channels** ki list me se **Destination Channel** select karein:", buttons=buttons)
 
     elif data.startswith("add_dest:") or data.startswith("add_destcust:"):
         dest_id = int(data.split(":")[1])
@@ -422,7 +469,9 @@ async def callback_handler(event):
         is_custom = user_data[user_id].get('source_list')
         action_prefix = "add_destcust" if is_custom else "add_dest"
         user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM' if is_custom else 'SELECT_DEST'}
-        await event.edit("🎯 Agle **Destination Channel** ka naam ya keyword type karke bhejein:")
+        client = user_data.get(user_id, {}).get('client')
+        buttons = await get_channel_buttons(client, action_prefix, require_admin=True, pinned_only=False)
+        await event.edit("🎯 Niche list me se agla **Destination Channel** select karein:", buttons=buttons)
 
     elif data == "start_sniper_final":
         client = user_data.get(user_id, {}).get('client')
@@ -440,7 +489,7 @@ async def handle_text(event):
     if text.startswith('/'):
         return
 
-    # 👑 MASTER ADMIN TEXT HANDLING (Ban, Unban & Custom Key Input)
+    # 👑 MASTER ADMIN TEXT HANDLING
     if user_id == MASTER_ID:
         state = user_states.get(user_id)
         if state == 'WAITING_BAN_ID':
@@ -460,7 +509,6 @@ async def handle_text(event):
             target_id = text
             found_key = None
             key_info = None
-            # Search if user had an active key previously
             for k, info in license_db["keys"].items():
                 if str(info.get("used_by")) == target_id:
                     found_key = k
@@ -475,9 +523,9 @@ async def handle_text(event):
                 }
                 save_licenses(license_db)
                 user_states[user_id] = None
-                await event.reply(f"✅ User `{target_id}` ko successfully UNBAN kar diya gaya hai!\nWo apni purani key se direct continue kar sakte hain.", buttons=[[Button.inline("🔙 Back to Admin Menu", b"adm_back")]])
+                await event.reply(f"✅ User `{target_id}` ko successfully UNBAN kar diya gaya hai!", buttons=[[Button.inline("🔙 Back to Admin Menu", b"adm_back")]])
             else:
-                await event.reply("❌ Is user ki koi purani key nahi mili. Kripya inhe nayi key generate karke dein.", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+                await event.reply("❌ Is user ki purani key nahi mili. Inhe nayi key generate karke dein.", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
         elif state == 'WAITING_CUSTOM_KEY':
@@ -485,19 +533,15 @@ async def handle_text(event):
                 parts = text.lower().split()
                 count = int(parts[0])
                 time_str = parts[1]
-                
                 if time_str.endswith('h'):
                     hours = int(time_str[:-1])
-                    days = 0
-                    validity_txt = f"{hours} Hours"
+                    days, validity_txt = 0, f"{hours} Hours"
                 elif time_str.endswith('d'):
                     days = int(time_str[:-1])
-                    hours = 0
-                    validity_txt = f"{days} Days"
+                    hours, validity_txt = 0, f"{days} Days"
                 else:
-                    days = int(time_str) # Default to days
-                    hours = 0
-                    validity_txt = f"{days} Days"
+                    days = int(time_str) 
+                    hours, validity_txt = 0, f"{days} Days"
                     
                 generated = [f"`{generate_key(days=days, hours=hours)}`" for _ in range(count)]
                 user_states[user_id] = None
@@ -530,23 +574,21 @@ async def handle_text(event):
         else:
             await event.reply("❌ **Invalid Key!** Sahi key enter karein ya Admin se contact karein.")
 
+    # Fallback Text Search for Channels (Agar Pinned se select na karna ho toh type bhi kar sakte hain)
     elif state == 'SELECT_SOURCES':
         client = user_data.get(user_id, {}).get('client')
         if client and client.is_connected():
             await search_and_send_channels(event, client, "add_source", query=text)
         else:
-            user_states[user_id] = {'state': 'WAITING_PHONE_FOR_SOURCE', 'pending_source': text}
-            await event.reply("📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
+            await event.reply("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif state in ['SELECT_DEST', 'SELECT_DEST_CUSTOM']:
         client = user_data.get(user_id, {}).get('client')
-        is_custom = user_data[user_id].get('source_list')
-        action_prefix = "add_destcust" if is_custom else "add_dest"
+        action_prefix = "add_destcust" if user_data[user_id].get('source_list') else "add_dest"
         if client and client.is_connected():
             await search_and_send_channels(event, client, action_prefix, query=text)
         else:
-            user_states[user_id] = {'state': 'WAITING_PHONE', 'pending_dest': text}
-            await event.reply("📱 Pehle apna **Telegram Phone Number** bhejein (Country code ke sath, jaise `+919876543210`):")
+            await event.reply("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif state in ['WAITING_PHONE', 'WAITING_PHONE_FOR_PINNED', 'WAITING_PHONE_FOR_SOURCE']:
         phone = text
