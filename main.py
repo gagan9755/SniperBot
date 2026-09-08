@@ -77,7 +77,11 @@ def init_user_db(user_id):
             'is_running': False, 'is_paused': False, 
             'replacer_link': None, 
             'replacer_username': None, 
+            'custom_header': None, 
+            'custom_footer': None, 
             'setup_type': 'normal', 
+            'setup_mode_cache': 'normal',
+            'setup_lines_cache': 4,
             'stats': {'forwarded': 0}
         }
         save_bot_data()
@@ -109,9 +113,15 @@ def format_time_left(td):
     return f"{days} Days" if days > 0 else f"{hours} Hours"
 
 # --- 🧠 UI BUTTON HELPERS ---
-def get_official_btn():
+def get_official_btn_row():
     link = license_db.get("settings", {}).get("official_channel", "")
-    return [Button.url("📢 Join Official Channel", url=link)] if link else []
+    if link: return [[Button.url("📢 Join Official Channel", url=link)]]
+    return None
+
+def get_official_btn_single():
+    link = license_db.get("settings", {}).get("official_channel", "")
+    if link: return [Button.url("📢 Join Official Channel", url=link)]
+    return []
 
 def get_mode_buttons():
     btns = [
@@ -119,7 +129,7 @@ def get_mode_buttons():
         [Button.inline("🎯 Specific Source Channel", b"mode_source")],
         [Button.inline("⚡ GOD MODE (Clone + Auto-Reply)", b"mode_god_start")]
     ]
-    off_btn = get_official_btn()
+    off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
     return btns
 
@@ -129,7 +139,7 @@ def get_control_buttons(validity_str):
         [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
         [Button.inline("📊 My Stats", b"ctl_stats")]
     ]
-    off_btn = get_official_btn()
+    off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
     return btns
 
@@ -142,10 +152,9 @@ def get_admin_buttons():
         [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
     ]
 
-# --- 🚀 DATA FETCHING FIX (1000 LIMIT) ---
+# --- 🚀 DATA FETCHING (1000 LIMIT) ---
 async def get_channel_buttons(client, action_type, require_admin=False, pinned_only=False):
     try:
-        # Puraani limit 200 thi, isko 1000 kar diya taki koi channel na choote
         dialogs = await client.get_dialogs(limit=1000)
         buttons = []
         for d in dialogs:
@@ -153,7 +162,6 @@ async def get_channel_buttons(client, action_type, require_admin=False, pinned_o
             if d.is_channel or d.is_group:
                 if require_admin and not (getattr(d.entity, 'creator', False) or getattr(d.entity, 'admin_rights', None)): continue
                 name = d.name[:20] if d.name else "Unnamed"
-                # Callback data 64 bytes tak hi hota hai, isliye name ko slice kar diya [:15]
                 buttons.append([Button.inline(name, data=f"{action_type}:{d.id}:{name[:15]}")])
                 if len(buttons) >= 60: break
         return buttons
@@ -178,7 +186,6 @@ class UserSniper:
         self.seen_codes_set = set()
         self.seen_codes_queue = deque(maxlen=100)
         
-        # 💬 AUTO-REPLY, DELETE, EDIT TRACKER
         self.msg_map = {} 
         self.msg_map_keys = deque(maxlen=1000)
         
@@ -230,8 +237,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 for d_id, sent_msg_id in dest_map.items():
                     target_entity = sniper.destinations.get(d_id)
                     if target_entity:
-                        try:
-                            await client.delete_messages(target_entity, sent_msg_id)
+                        try: await client.delete_messages(target_entity, sent_msg_id)
                         except: pass
 
     @client.on(events.MessageEdited())
@@ -247,10 +253,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
-            if replacer_link:
-                msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-            if replacer_uname:
-                msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
+            if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+            if replacer_uname: msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
 
             dest_map = sniper.msg_map[event.id]
             for d_id, sent_msg_id in dest_map.items():
@@ -295,22 +299,17 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         messages_to_send = []
         text_content = event.message.message or ""
 
-        # ⚡ GOD MODE LOGIC
         if sniper.sniper_mode == "god":
             if not text_content and not event.message.media: return
-            
             msg_html = html.unparse(text_content, event.message.entities)
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
-            if replacer_link:
-                msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-            if replacer_uname:
-                msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
+            if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+            if replacer_uname: msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
                 
             messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True})
 
-        # 🚀 NORMAL MODES LOGIC
         else:
             if not text_content: return
             extracted_items = []
@@ -331,22 +330,28 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                             extracted_items.append(ent_text)
 
             if not extracted_items: return
-            
             for item in extracted_items:
                 if len(sniper.seen_codes_queue) == 100:
                     sniper.seen_codes_set.discard(sniper.seen_codes_queue.popleft())
                 sniper.seen_codes_queue.append(item)
                 sniper.seen_codes_set.add(item)
 
+            # 🚀 RUSH MODE (NO HEADER/FOOTER)
             if sniper.sniper_mode == "rush":
                 num = len(extracted_items)
                 lines = [f"`{extracted_items[0]}`"] * 3 if num == 1 else [f"`{extracted_items[0]}`"] * 2 + [f"`{extracted_items[1]}`"] * 2 if num == 2 else [f"`{c}`" for c in extracted_items]
                 messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_god': False})
+            
+            # 📝 NORMAL & LINK MODE (WITH HEADER/FOOTER)
             else:
                 for c in extracted_items: 
-                    messages_to_send.append({'text': "\n".join([f"`{c}`"] * sniper.lines_count), 'media': None, 'is_god': False})
+                    body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
+                    final_text = ""
+                    if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
+                    final_text += body_text
+                    if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
+                    messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
 
-        # 💬 MESSAGE SENDING & AUTO-REPLY LOGIC
         sent_msgs_this_event = {}
         reply_to_id = event.message.reply_to_msg_id
         
@@ -366,7 +371,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                         sent_msgs_this_event[d_id] = sent_msg.id
                 except: pass
                 
-        # TRACK ID's FOR AUTO-REPLY, AUTO-DELETE, & AUTO-EDIT
         if sent_msgs_this_event:
             if len(sniper.msg_map_keys) >= 1000:
                 old_id = sniper.msg_map_keys.popleft()
@@ -389,7 +393,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         )
     except: pass
 
-# --- 🚀 AUTO RESUME ON RESTART ---
 async def auto_resume_snipers():
     await asyncio.sleep(2)
     for uid_str, data in bot_db.items():
@@ -409,7 +412,7 @@ async def auto_resume_snipers():
                     await start_sniper_for_user(user_id, client, dests, "User", sources, mode, lines)
             except: pass
 
-# --- 💬 BOT CONVERSATION & LOGIC ---
+# --- 💬 COMMAND HANDLERS & SMART LOGIN ---
 @master_bot.on(events.NewMessage(pattern='/start'))
 async def start_command(event):
     user_id = event.sender_id
@@ -432,22 +435,28 @@ async def start_command(event):
                 return
 
             client = user_data.get(user_id, {}).get('client')
-            if client and client.is_connected():
+            if not client:
+                client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
+                await client.connect()
+                
+            if await client.is_user_authorized():
+                if user_id not in user_data: user_data[user_id] = {}
+                user_data[user_id]['client'] = client
                 user_states[user_id] = 'CHOOSE_MODE'
                 await event.reply(f"✅ **Welcome Back!** (⏳ `{validity_str}`)\n\n🎯 Apne kaam ke liye **Target Mode** select karein:", buttons=get_mode_buttons())
             else:
+                if user_id not in user_data: user_data[user_id] = {}
+                user_data[user_id]['client'] = client
                 user_states[user_id] = 'WAITING_PHONE'
                 await event.reply(f"✅ **Welcome Back!** (⏳ `{validity_str}`)\n\n📱 Pehle apna **Telegram Phone Number** bhejein:")
             return
         else:
             user_states[user_id] = 'WAITING_KEY'
-            off_btn = get_official_btn()
-            await event.reply("⚠️ **Aapki purani Key Expire ho chuki hai!**\n\nKripya apni **Nayi License Key (PIN)** yahan bhejein:", buttons=[off_btn] if off_btn else None)
+            await event.reply("⚠️ **Aapki purani Key Expire ho chuki hai!**\n\nKripya apni **Nayi License Key (PIN)** yahan bhejein:", buttons=get_official_btn_row())
             return
 
     user_states[user_id] = 'WAITING_KEY'
-    off_btn = get_official_btn()
-    await event.reply("🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:", buttons=[off_btn] if off_btn else None)
+    await event.reply("🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:", buttons=get_official_btn_row())
 
 @master_bot.on(events.CallbackQuery)
 async def callback_handler(event):
@@ -546,7 +555,7 @@ async def callback_handler(event):
             ]
         )
 
-    # 🎯 TARGET SELECTION (NORMAL OR GOD)
+    # 🎯 TARGET SELECTION
     elif data in ["mode_pinned", "god_mode_pinned"]:
         is_god = data.startswith("god_")
         bot_db[uid]['setup_type'] = 'god' if is_god else 'normal'
@@ -622,7 +631,6 @@ async def callback_handler(event):
     # ADD / REMOVE DESTINATION
     elif data.startswith("add_dest:") or data.startswith("add_destcust:") or data.startswith("rem_dest:"):
         action, d_id = data.split(":")[0], data.split(":")[1]
-        
         if action.startswith("add_"):
             d_name = data.split(":")[2] if len(data.split(":")) > 2 else "Channel"
             bot_db[uid]['dest_dict'][str(d_id)] = d_name
@@ -630,7 +638,6 @@ async def callback_handler(event):
             bot_db[uid]['dest_dict'].pop(str(d_id), None)
             
         save_bot_data()
-        
         is_custom = bool(bot_db[uid].get('source_dict'))
         more_action = b"more_destcust" if is_custom else b"more_dest"
         is_god = (bot_db[uid].get('setup_type') == 'god')
@@ -673,7 +680,7 @@ async def callback_handler(event):
             "2️⃣ **Normal Mode:** Har Mono code ka alag msg\n"
             "3️⃣ **Link Forwarder:** Message se URLs in Mono",
             buttons=[
-                [Button.inline("🚀 Start Rush Mode", b"run_rush_0")],
+                [Button.inline("🚀 Start Rush Mode", b"run_rush_0")], # Bypass format menu for Rush Mode
                 [Button.inline("🟢 Normal Mode", b"ask_lines_normal")],
                 [Button.inline("🔗 Link Forwarder", b"ask_lines_link")],
                 [Button.inline("🔙 Back", b"back_to_mode")]
@@ -685,25 +692,69 @@ async def callback_handler(event):
         await event.edit(
             f"📏 **{mode.capitalize()} Mode - Line Settings:**\nAapko har item kitni lines me bhejna hai?",
             buttons=[
-                [Button.inline("1 Line", f"run_{mode}_1".encode()), Button.inline("2 Lines", f"run_{mode}_2".encode())],
-                [Button.inline("3 Lines", f"run_{mode}_3".encode()), Button.inline("4 Lines", f"run_{mode}_4".encode())],
+                [Button.inline("1 Line", f"format_{mode}_1".encode()), Button.inline("2 Lines", f"format_{mode}_2".encode())],
+                [Button.inline("3 Lines", f"format_{mode}_3".encode()), Button.inline("4 Lines", f"format_{mode}_4".encode())],
                 [Button.inline("🔙 Back", b"select_fwd_mode")]
             ]
         )
 
-    # ⚡ GOD MODE DASHBOARD (Links & Usernames)
+    # 📝 NAYA: FORMAT SETUP MENU (HEADER / FOOTER)
+    elif data.startswith("format_"):
+        parts = data.split("_")
+        bot_db[uid]['setup_mode_cache'] = parts[1]
+        bot_db[uid]['setup_lines_cache'] = int(parts[2])
+        save_bot_data()
+        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+
+    elif data == "show_format_menu":
+        header = bot_db[uid].get('custom_header')
+        footer = bot_db[uid].get('custom_footer')
+        mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
+        lines_cache = bot_db[uid].get('setup_lines_cache', 4)
+
+        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text (Jaise koi disclaimer ya link) laga sakte hain.\n\n"
+        msg += f"🔝 **Header (First Line):**\n`{header}`\n\n" if header else "🔝 **Header:** ❌ Not Set\n\n"
+        msg += f"🔚 **Footer (Last Line):**\n`{footer}`\n\n" if footer else "🔚 **Footer:** ❌ Not Set\n\n"
+        
+        btns = [
+            [Button.inline("🔝 Set Header", b"ask_header"), Button.inline("🗑️ Remove Header", b"rem_header")],
+            [Button.inline("🔚 Set Footer", b"ask_footer"), Button.inline("🗑️ Remove Footer", b"rem_footer")],
+            [Button.inline("🚀 Start Bot", f"run_{mode_cache}_{lines_cache}".encode())],
+            [Button.inline("🔙 Cancel", b"select_fwd_mode")]
+        ]
+        
+        try: await event.edit(msg, buttons=btns)
+        except: await event.respond(msg, buttons=btns)
+
+    elif data == "rem_header":
+        bot_db[uid]['custom_header'] = None
+        save_bot_data()
+        await event.answer("Header Removed!", alert=True)
+        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+        
+    elif data == "rem_footer":
+        bot_db[uid]['custom_footer'] = None
+        save_bot_data()
+        await event.answer("Footer Removed!", alert=True)
+        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+
+    elif data == "ask_header":
+        prompt_msg = await event.edit("🔝 **Send Custom Header:**\n\nJo text aapko message ke sabse upar likhna hai, wo type karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"show_format_menu")]])
+        user_states[user_id] = {'state': 'WAITING_HEADER', 'prompt_id': prompt_msg.id}
+        
+    elif data == "ask_footer":
+        prompt_msg = await event.edit("🔚 **Send Custom Footer:**\n\nJo text aapko message ke sabse niche likhna hai, wo type karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"show_format_menu")]])
+        user_states[user_id] = {'state': 'WAITING_FOOTER', 'prompt_id': prompt_msg.id}
+
+    # ⚡ GOD MODE DASHBOARD
     elif data == "setup_god_mode":
         link = bot_db[uid].get('replacer_link')
         uname = bot_db[uid].get('replacer_username')
         
         msg = "⚡ **GOD MODE Setup:**\n\nIs mode me messages exactly same format me copy honge (Auto-replies, Auto-Edit & Auto-Delete included).\n\n"
-        
         link_str = f"`{link}`" if link else "❌ Not Set"
         uname_str = f"`{uname}`" if uname else "❌ Not Set"
-        
-        msg += f"🔗 **Private Link:** {link_str}\n"
-        msg += f"👤 **@Username:** {uname_str}\n\n"
-        msg += "Aap in dono ko apni custom Link/Username se replace karne ke liye set kar sakte hain."
+        msg += f"🔗 **Private Link:** {link_str}\n👤 **@Username:** {uname_str}\n\n"
         
         btns = [
             [Button.inline("🔗 Change Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
@@ -713,7 +764,6 @@ async def callback_handler(event):
         ]
         await event.edit(msg, buttons=btns)
 
-    # REMOVE HANDLERS
     elif data == "rem_replacer_link":
         bot_db[uid]['replacer_link'] = None
         save_bot_data()
@@ -726,14 +776,13 @@ async def callback_handler(event):
         await event.answer("Username Removed!", alert=True)
         await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
 
-    # ASK HANDLERS
     elif data == "ask_replacer_link":
-        user_states[user_id] = 'WAITING_CLONE_LINK'
-        await event.edit("🔗 **Send Custom Link:**\n\nKripya chat me apni wo Custom Link paste karke bhejein jisse aap purani links ko replace karna chahte hain:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
+        prompt_msg = await event.edit("🔗 **Send Custom Link:**\n\nKripya chat me apni wo Custom Link paste karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
+        user_states[user_id] = {'state': 'WAITING_CLONE_LINK', 'prompt_id': prompt_msg.id}
 
     elif data == "ask_replacer_username":
-        user_states[user_id] = 'WAITING_CLONE_USERNAME'
-        await event.edit("👤 **Send Custom @Username:**\n\nKripya chat me apna `@username` bhejein jisse aap source wale usernames ko replace karna chahte hain:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
+        prompt_msg = await event.edit("👤 **Send Custom @Username:**\n\nKripya chat me apna `@username` bhejein:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
+        user_states[user_id] = {'state': 'WAITING_CLONE_USERNAME', 'prompt_id': prompt_msg.id}
 
     # START RUN
     elif data.startswith("run_"):
@@ -749,8 +798,7 @@ async def callback_handler(event):
         await event.edit(f"🚀 **Sniper Bot Start ho raha hai [{mode_disp} Mode]...**")
         await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count)
 
-
-# --- 💬 TEXT HANDLER (INCLUDING MANUAL CHANNEL SEARCH) ---
+# --- 💬 TEXT HANDLER ---
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
     user_id = event.sender_id
@@ -812,16 +860,17 @@ async def handle_text(event):
             except: await event.reply("⚠️ Format Error! (Ex: `1 12h`)", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
-    # 🔍 TEXT SEARCH FOR CHANNELS (FIX FOR MISSING BUTTONS)
+    # 🔍 TEXT SEARCH FOR CHANNELS
     if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES', 'SELECT_DEST', 'SELECT_DEST_CUSTOM']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
-        
         query = text.lower()
         st = state.get('state')
         action_prefix = "add_destcust" if st == 'SELECT_DEST_CUSTOM' else "add_dest" if st == 'SELECT_DEST' else "add_source"
         require_admin = st in ['SELECT_DEST', 'SELECT_DEST_CUSTOM']
         
+        try: await event.delete()
+        except: pass
         try:
             dialogs = await client.get_dialogs(limit=1000)
             buttons = []
@@ -829,7 +878,6 @@ async def handle_text(event):
                 if d.is_channel or d.is_group:
                     if require_admin and not (getattr(d.entity, 'creator', False) or getattr(d.entity, 'admin_rights', None)): continue
                     name = d.name if d.name else "Unnamed"
-                    # Match name or username
                     uname = getattr(d.entity, 'username', '') or ''
                     if query in name.lower() or query in uname.lower():
                         buttons.append([Button.inline(name[:20], data=f"{action_prefix}:{d.id}:{name[:15]}")])
@@ -839,29 +887,74 @@ async def handle_text(event):
                 is_god = (bot_db[uid].get('setup_type') == 'god')
                 back_rt = b"mode_god_start" if is_god else b"back_to_mode"
                 buttons.append([Button.inline("🔙 Back", back_rt)])
-                await event.reply(f"🔍 **Search Results for '{text}':**\nSelect your channel below:", buttons=buttons)
+                await event.respond(f"🔍 **Search Results for '{text}':**\nSelect your channel below:", buttons=buttons)
             else:
-                await event.reply(f"❌ Koi channel nahi mila '{text}' ke naam se. Kripya sahi spelling ya @username bhejein.")
-        except Exception as e:
-            pass
+                await event.respond(f"❌ Koi channel nahi mila '{text}' ke naam se. Kripya sahi spelling ya @username bhejein.")
+        except Exception as e: pass
         return
 
-    # 🔗 CUSTOM SETTINGS FOR GOD MODE
-    if state == 'WAITING_CLONE_LINK':
-        bot_db[uid]['replacer_link'] = text
+    # 📝 CUSTOM HEADER / FOOTER SAVER
+    if isinstance(state, dict) and state.get('state') in ['WAITING_HEADER', 'WAITING_FOOTER']:
+        is_header = state.get('state') == 'WAITING_HEADER'
+        if is_header:
+            bot_db[uid]['custom_header'] = text
+            success_txt = "✅ **Header Saved Successfully!**"
+        else:
+            bot_db[uid]['custom_footer'] = text
+            success_txt = "✅ **Footer Saved Successfully!**"
+            
         save_bot_data()
+        try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
+        except: pass
         user_states[user_id] = None
-        await event.reply("✅ **Link Saved Successfully!**")
-        await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
+        
+        header = bot_db[uid].get('custom_header')
+        footer = bot_db[uid].get('custom_footer')
+        mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
+        lines_cache = bot_db[uid].get('setup_lines_cache', 4)
+
+        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text (Jaise koi disclaimer ya link) laga sakte hain.\n\n"
+        msg += f"🔝 **Header (First Line):**\n`{header}`\n\n" if header else "🔝 **Header:** ❌ Not Set\n\n"
+        msg += f"🔚 **Footer (Last Line):**\n`{footer}`\n\n" if footer else "🔚 **Footer:** ❌ Not Set\n\n"
+        
+        btns = [
+            [Button.inline("🔝 Set Header", b"ask_header"), Button.inline("🗑️ Remove Header", b"rem_header")],
+            [Button.inline("🔚 Set Footer", b"ask_footer"), Button.inline("🗑️ Remove Footer", b"rem_footer")],
+            [Button.inline("🚀 Start Bot", f"run_{mode_cache}_{lines_cache}".encode())],
+            [Button.inline("🔙 Cancel", b"select_fwd_mode")]
+        ]
+        await event.respond(f"{success_txt}\n\n{msg}", buttons=btns)
         return
 
-    if state == 'WAITING_CLONE_USERNAME':
-        if not text.startswith('@'): text = '@' + text
-        bot_db[uid]['replacer_username'] = text
+    # 🔗 CUSTOM LINK/USERNAME SAVER (GOD MODE)
+    if isinstance(state, dict) and state.get('state') in ['WAITING_CLONE_LINK', 'WAITING_CLONE_USERNAME']:
+        is_link = state.get('state') == 'WAITING_CLONE_LINK'
+        if is_link:
+            bot_db[uid]['replacer_link'] = text
+            success_txt = "✅ **Link Saved Successfully!**"
+        else:
+            if not text.startswith('@'): text = '@' + text
+            bot_db[uid]['replacer_username'] = text
+            success_txt = "✅ **Username Saved Successfully!**"
+            
         save_bot_data()
+        try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
+        except: pass
         user_states[user_id] = None
-        await event.reply("✅ **Username Saved Successfully!**")
-        await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
+        
+        link = bot_db[uid].get('replacer_link')
+        uname = bot_db[uid].get('replacer_username')
+        
+        msg = "⚡ **GOD MODE Setup:**\n\nIs mode me messages exactly same format me copy honge (Auto-replies, Auto-Edit & Auto-Delete included).\n\n"
+        msg += f"🔗 **Private Link:** {f'`{link}`' if link else '❌ Not Set'}\n👤 **@Username:** {f'`{uname}`' if uname else '❌ Not Set'}\n\n"
+        
+        btns = [
+            [Button.inline("🔗 Change Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
+            [Button.inline("👤 Change @Username", b"ask_replacer_username"), Button.inline("🗑️ Remove User", b"rem_replacer_username")],
+            [Button.inline("🚀 Start GOD MODE", b"run_god_0")],
+            [Button.inline("🔙 Cancel Setup", b"mode_god_start")]
+        ]
+        await event.respond(f"{success_txt}\n\n{msg}", buttons=btns)
         return
 
     # LOGIN LOGIC
@@ -875,10 +968,19 @@ async def handle_text(event):
             license_db["users"][str(user_id)] = {"name": event.sender.first_name, "key": text, "expires": k_info["expires"]}
             save_licenses(license_db)
             
-            if user_data.get(user_id, {}).get('client', TelegramClient(None,None,None)).is_connected():
+            client = user_data.get(user_id, {}).get('client')
+            if not client:
+                client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
+                await client.connect()
+                
+            if await client.is_user_authorized():
+                if user_id not in user_data: user_data[user_id] = {}
+                user_data[user_id]['client'] = client
                 user_states[user_id] = 'CHOOSE_MODE'
                 await event.reply("✅ **Key Verified!**\n🎯 Target Mode select karein:", buttons=get_mode_buttons())
             else:
+                if user_id not in user_data: user_data[user_id] = {}
+                user_data[user_id]['client'] = client
                 user_states[user_id] = 'WAITING_PHONE'
                 await event.reply("✅ **Key Verified!**\n📱 Apna **Telegram Phone Number** bhejein:")
         else: await event.reply("❌ **Invalid Key!**")
