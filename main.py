@@ -672,7 +672,7 @@ async def callback_handler(event):
         buttons.append([Button.inline("🔙 Back", back_route)])
         await event.edit("🎯 Agla **Destination Channel** select karein:\n\n*(Aap channel ka naam type bhi kar sakte hain)*", buttons=buttons)
 
-    # 🛠 FORWARDING MODE MENU (NORMAL)
+    # 🛠 FORWARDING MODE MENU
     elif data == "select_fwd_mode":
         await event.edit(
             "🛠 **Sniper Forwarding Mode:**\n\nAb choose karein format:\n"
@@ -680,7 +680,7 @@ async def callback_handler(event):
             "2️⃣ **Normal Mode:** Har Mono code ka alag msg\n"
             "3️⃣ **Link Forwarder:** Message se URLs in Mono",
             buttons=[
-                [Button.inline("🚀 Start Rush Mode", b"run_rush_0")], # Bypass format menu for Rush Mode
+                [Button.inline("🚀 Start Rush Mode", b"run_rush_0")], 
                 [Button.inline("🟢 Normal Mode", b"ask_lines_normal")],
                 [Button.inline("🔗 Link Forwarder", b"ask_lines_link")],
                 [Button.inline("🔙 Back", b"back_to_mode")]
@@ -698,7 +698,7 @@ async def callback_handler(event):
             ]
         )
 
-    # 📝 NAYA: FORMAT SETUP MENU (HEADER / FOOTER)
+    # 📝 FORMAT SETUP MENU (HEADER / FOOTER)
     elif data.startswith("format_"):
         parts = data.split("_")
         bot_db[uid]['setup_mode_cache'] = parts[1]
@@ -712,7 +712,7 @@ async def callback_handler(event):
         mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
         lines_cache = bot_db[uid].get('setup_lines_cache', 4)
 
-        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text (Jaise koi disclaimer ya link) laga sakte hain.\n\n"
+        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text laga sakte hain.\n\n"
         msg += f"🔝 **Header (First Line):**\n`{header}`\n\n" if header else "🔝 **Header:** ❌ Not Set\n\n"
         msg += f"🔚 **Footer (Last Line):**\n`{footer}`\n\n" if footer else "🔚 **Footer:** ❌ Not Set\n\n"
         
@@ -913,7 +913,7 @@ async def handle_text(event):
         mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
         lines_cache = bot_db[uid].get('setup_lines_cache', 4)
 
-        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text (Jaise koi disclaimer ya link) laga sakte hain.\n\n"
+        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text laga sakte hain.\n\n"
         msg += f"🔝 **Header (First Line):**\n`{header}`\n\n" if header else "🔝 **Header:** ❌ Not Set\n\n"
         msg += f"🔚 **Footer (Last Line):**\n`{footer}`\n\n" if footer else "🔚 **Footer:** ❌ Not Set\n\n"
         
