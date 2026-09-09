@@ -79,7 +79,7 @@ def init_user_db(user_id):
             'replacer_username': None, 
             'custom_header': None, 
             'custom_footer': None, 
-            'over_timer': 0, # ⏱️ Auto-Over Timer (in seconds)
+            'over_timer': 0, 
             'setup_type': 'normal', 
             'setup_mode_cache': 'normal',
             'setup_lines_cache': 4,
@@ -723,7 +723,7 @@ async def callback_handler(event):
             ]
         )
 
-    # ⏱️ AUTO-OVER TIMER SETUP MENU (Normal Mode ke baad)
+    # ⏱️ AUTO-OVER TIMER SETUP MENU (FIXED ROUTING)
     elif data.startswith("format_"):
         parts = data.split("_")
         mode_cache = parts[1]
@@ -736,15 +736,15 @@ async def callback_handler(event):
         await event.edit(
             "⏱️ **Auto-Over Timer Setup:**\n\nKitne time baad message par ❌️❌️ OVER ❌️❌️ likh kar aa jana chahiye?",
             buttons=[
-                [Button.inline("⏳ 10 Seconds", b"set_timer_10"), Button.inline("⏳ 30 Seconds", b"set_timer_30")],
-                [Button.inline("⏱️ 1 Minute", b"set_timer_60"), Button.inline("⏱️ 5 Minutes", b"set_timer_300")],
-                [Button.inline("❌ No Timer (Never Over)", b"set_timer_0")],
+                [Button.inline("⏳ 10 Seconds", b"timer_10"), Button.inline("⏳ 30 Seconds", b"timer_30")],
+                [Button.inline("⏱️ 1 Minute", b"timer_60"), Button.inline("⏱️ 5 Minutes", b"timer_300")],
+                [Button.inline("❌ No Timer (Never Over)", b"timer_0")],
                 [Button.inline("🔙 Back", b"select_fwd_mode")]
             ]
         )
 
-    elif data.startswith("set_timer_"):
-        timer_val = int(data.split("_")[2])
+    elif data.startswith("timer_"):
+        timer_val = int(data.split("_")[1])
         bot_db[uid]['over_timer'] = timer_val
         save_bot_data()
         
