@@ -127,7 +127,7 @@ def get_mode_buttons():
     btns = [
         [Button.inline("📌 Auto Pinned Chats Mode", b"mode_pinned")],
         [Button.inline("🎯 Specific Source Channel", b"mode_source")],
-        [Button.inline("⚡ GOD MODE (Clone + Auto-Reply)", b"mode_god_start")]
+        [Button.inline("⚡ GOD MODE (Clone + Stickers + Auto-Reply)", b"mode_god_start")]
     ]
     off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
@@ -247,9 +247,11 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         
         if event.id in sniper.msg_map:
             text_content = event.message.message or ""
-            if not text_content and not event.message.media: return
-            
-            msg_html = html.unparse(text_content, event.message.entities)
+            try:
+                msg_html = html.unparse(text_content, event.message.entities)
+            except:
+                msg_html = text_content
+
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
@@ -299,16 +301,22 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         messages_to_send = []
         text_content = event.message.message or ""
 
+        # ⚡ GOD MODE (EXACT CLONE + STICKERS / EMOJIS SUPPORT)
         if sniper.sniper_mode == "god":
             if not text_content and not event.message.media: return
-            msg_html = html.unparse(text_content, event.message.entities)
+            
+            try:
+                msg_html = html.unparse(text_content, event.message.entities)
+            except:
+                msg_html = text_content
+                
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
             if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
             if replacer_uname: msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
                 
-            messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True})
+            messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True, 'is_forward': (not text_content and event.message.media)})
 
         else:
             if not text_content: return
@@ -336,13 +344,10 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 sniper.seen_codes_queue.append(item)
                 sniper.seen_codes_set.add(item)
 
-            # 🚀 RUSH MODE (NO HEADER/FOOTER)
             if sniper.sniper_mode == "rush":
                 num = len(extracted_items)
                 lines = [f"`{extracted_items[0]}`"] * 3 if num == 1 else [f"`{extracted_items[0]}`"] * 2 + [f"`{extracted_items[1]}`"] * 2 if num == 2 else [f"`{c}`" for c in extracted_items]
-                messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_god': False})
-            
-            # 📝 NORMAL & LINK MODE (WITH HEADER/FOOTER)
+                messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_god': False, 'is_forward': False})
             else:
                 for c in extracted_items: 
                     body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
@@ -350,7 +355,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
                     final_text += body_text
                     if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
-                    messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
+                    messages_to_send.append({'text': final_text, 'media': None, 'is_god': False, 'is_forward': False})
 
         sent_msgs_this_event = {}
         reply_to_id = event.message.reply_to_msg_id
@@ -362,14 +367,23 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if reply_to_id and reply_to_id in sniper.msg_map:
                         dest_reply_id = sniper.msg_map[reply_to_id].get(d_id)
                     
-                    kwargs = {'parse_mode': 'html' if item['is_god'] else 'md'}
-                    if dest_reply_id: kwargs['reply_to'] = dest_reply_id
-                    if item['media']: kwargs['file'] = item['media']
-                    
-                    sent_msg = await client.send_message(target, item['text'], **kwargs)
-                    if sent_msg:
-                        sent_msgs_this_event[d_id] = sent_msg.id
-                except: pass
+                    # 🧩 STICKER & MEDIA FORWARD SAFE HANDLING
+                    if item.get('is_forward') and item['media']:
+                        sent_msg = await client.forward_messages(target, event.message)
+                        if sent_msg: sent_msgs_this_event[d_id] = sent_msg.id
+                    else:
+                        kwargs = {'parse_mode': 'html' if item['is_god'] else 'md'}
+                        if dest_reply_id: kwargs['reply_to'] = dest_reply_id
+                        if item['media']: kwargs['file'] = item['media']
+                        
+                        sent_msg = await client.send_message(target, item['text'], **kwargs)
+                        if sent_msg: sent_msgs_this_event[d_id] = sent_msg.id
+                except Exception as e:
+                    # Fallback to direct forward if any text/emoji formatting fails
+                    try:
+                        sent_msg = await client.forward_messages(target, event.message)
+                        if sent_msg: sent_msgs_this_event[d_id] = sent_msg.id
+                    except: pass
                 
         if sent_msgs_this_event:
             if len(sniper.msg_map_keys) >= 1000:
@@ -590,7 +604,6 @@ async def callback_handler(event):
     # ADD / REMOVE SOURCE
     elif data.startswith("add_source:") or data.startswith("rem_source:"):
         action, s_id = data.split(":")[0], data.split(":")[1]
-        
         if action == "add_source":
             s_name = data.split(":")[2] if len(data.split(":")) > 2 else "Channel"
             bot_db[uid]['source_dict'][str(s_id)] = s_name
