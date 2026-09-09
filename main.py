@@ -79,7 +79,7 @@ def init_user_db(user_id):
             'replacer_username': None, 
             'custom_header': None, 
             'custom_footer': None, 
-            'over_timer': 0, 
+            'over_timer': 0, # ⏱️ Auto-Over Timer (in seconds)
             'setup_type': 'normal', 
             'setup_mode_cache': 'normal',
             'setup_lines_cache': 4,
@@ -723,7 +723,7 @@ async def callback_handler(event):
             ]
         )
 
-    # ⏱️ AUTO-OVER TIMER SETUP MENU (FIXED ROUTING)
+    # ⏱️ AUTO-OVER TIMER SETUP MENU (Normal Mode ke baad)
     elif data.startswith("format_"):
         parts = data.split("_")
         mode_cache = parts[1]
@@ -748,8 +748,24 @@ async def callback_handler(event):
         bot_db[uid]['over_timer'] = timer_val
         save_bot_data()
         
-        # Timer set hone ke baad ab Format Menu (Header/Footer) par jayega
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+        # Seedha yhi par Header/Footer menu render kar do (No event routing crash)
+        header = bot_db[uid].get('custom_header')
+        footer = bot_db[uid].get('custom_footer')
+        mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
+        lines_cache = bot_db[uid].get('setup_lines_cache', 4)
+
+        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text laga sakte hain.\n\n"
+        msg += f"🔝 **Header (First Line):**\n`{header}`\n\n" if header else "🔝 **Header:** ❌ Not Set\n\n"
+        msg += f"🔚 **Footer (Last Line):**\n`{footer}`\n\n" if footer else "🔚 **Footer:** ❌ Not Set\n\n"
+        
+        btns = [
+            [Button.inline("🔝 Set Header", b"ask_header"), Button.inline("🗑️ Remove Header", b"rem_header")],
+            [Button.inline("🔚 Set Footer", b"ask_footer"), Button.inline("🗑️ Remove Footer", b"rem_footer")],
+            [Button.inline("🚀 Start Bot", f"run_{mode_cache}_{lines_cache}".encode())],
+            [Button.inline("🔙 Cancel", b"select_fwd_mode")]
+        ]
+        
+        await event.edit(msg, buttons=btns)
 
     # 📝 FORMAT SETUP MENU (HEADER / FOOTER)
     elif data == "show_format_menu":
