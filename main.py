@@ -77,11 +77,7 @@ def init_user_db(user_id):
             'is_running': False, 'is_paused': False, 
             'replacer_link': None, 
             'replacer_username': None, 
-            'custom_header': None, 
-            'custom_footer': None, 
             'setup_type': 'normal', 
-            'setup_mode_cache': 'normal',
-            'setup_lines_cache': 4,
             'stats': {'forwarded': 0}
         }
         save_bot_data()
@@ -115,12 +111,14 @@ def format_time_left(td):
 # --- 🧠 UI BUTTON HELPERS ---
 def get_official_btn_row():
     link = license_db.get("settings", {}).get("official_channel", "")
-    if link: return [[Button.url("📢 Join Official Channel", url=link)]]
+    if link:
+        return [[Button.url("📢 Join Official Channel", url=link)]]
     return None
 
 def get_official_btn_single():
     link = license_db.get("settings", {}).get("official_channel", "")
-    if link: return [Button.url("📢 Join Official Channel", url=link)]
+    if link:
+        return [Button.url("📢 Join Official Channel", url=link)]
     return []
 
 def get_mode_buttons():
@@ -237,7 +235,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 for d_id, sent_msg_id in dest_map.items():
                     target_entity = sniper.destinations.get(d_id)
                     if target_entity:
-                        try: await client.delete_messages(target_entity, sent_msg_id)
+                        try:
+                            await client.delete_messages(target_entity, sent_msg_id)
                         except: pass
 
     @client.on(events.MessageEdited())
@@ -249,16 +248,14 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             text_content = event.message.message or ""
             if not text_content and not event.message.media: return
             
-            try:
-                msg_html = html.unparse(text_content, event.message.entities)
-            except:
-                msg_html = text_content # Fallback agar custom emoji crash kare
-
+            msg_html = html.unparse(text_content, event.message.entities)
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
-            if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-            if replacer_uname: msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
+            if replacer_link:
+                msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+            if replacer_uname:
+                msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
 
             dest_map = sniper.msg_map[event.id]
             for d_id, sent_msg_id in dest_map.items():
@@ -303,20 +300,17 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         messages_to_send = []
         text_content = event.message.message or ""
 
-        # ⚡ GOD MODE (SAFE HTML PARSER FOR CUSTOM EMOJIS / STICKERS)
         if sniper.sniper_mode == "god":
             if not text_content and not event.message.media: return
             
-            try:
-                msg_html = html.unparse(text_content, event.message.entities)
-            except:
-                msg_html = text_content # Safe fallback if custom emoji crashes unparse
-                
+            msg_html = html.unparse(text_content, event.message.entities)
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
-            if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-            if replacer_uname: msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
+            if replacer_link:
+                msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+            if replacer_uname:
+                msg_html = re.sub(r'(?<![a-zA-Z0-9])@[a-zA-Z0-9_]+', replacer_uname, msg_html)
                 
             messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True})
 
@@ -340,6 +334,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                             extracted_items.append(ent_text)
 
             if not extracted_items: return
+            
             for item in extracted_items:
                 if len(sniper.seen_codes_queue) == 100:
                     sniper.seen_codes_set.discard(sniper.seen_codes_queue.popleft())
@@ -352,12 +347,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_god': False})
             else:
                 for c in extracted_items: 
-                    body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
-                    final_text = ""
-                    if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
-                    final_text += body_text
-                    if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
-                    messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
+                    messages_to_send.append({'text': "\n".join([f"`{c}`"] * sniper.lines_count), 'media': None, 'is_god': False})
 
         sent_msgs_this_event = {}
         reply_to_id = event.message.reply_to_msg_id
@@ -376,13 +366,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     sent_msg = await client.send_message(target, item['text'], **kwargs)
                     if sent_msg:
                         sent_msgs_this_event[d_id] = sent_msg.id
-                except Exception as e:
-                    # Agar HTML mode me custom emoji ki vajah se fail ho, toh plain text me bhej do taki ruk na sake
-                    try:
-                        if item.get('is_god'):
-                            sent_msg = await client.send_message(target, item['text'], parse_mode=None, file=item['media'])
-                            if sent_msg: sent_msgs_this_event[d_id] = sent_msg.id
-                    except: pass
+                except: pass
                 
         if sent_msgs_this_event:
             if len(sniper.msg_map_keys) >= 1000:
@@ -447,6 +431,7 @@ async def start_command(event):
                 await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke liye niche buttons use karein:", buttons=get_control_buttons(validity_str))
                 return
 
+            # 🚀 SMART LOGIN FIX: Pehle check karega ki .session file exist karti hai ya nahi
             client = user_data.get(user_id, {}).get('client')
             if not client:
                 client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
@@ -461,6 +446,7 @@ async def start_command(event):
                 if user_id not in user_data: user_data[user_id] = {}
                 user_data[user_id]['client'] = client
                 user_states[user_id] = 'WAITING_PHONE'
+                # 📱 Seedha Phone Number mangega, Key nahi! (Kyunki Key already bind hai)
                 await event.reply(f"✅ **Welcome Back!** (⏳ `{validity_str}`)\n\n📱 Pehle apna **Telegram Phone Number** bhejein:")
             return
         else:
@@ -603,6 +589,7 @@ async def callback_handler(event):
     # ADD / REMOVE SOURCE
     elif data.startswith("add_source:") or data.startswith("rem_source:"):
         action, s_id = data.split(":")[0], data.split(":")[1]
+        
         if action == "add_source":
             s_name = data.split(":")[2] if len(data.split(":")) > 2 else "Channel"
             bot_db[uid]['source_dict'][str(s_id)] = s_name
@@ -643,6 +630,7 @@ async def callback_handler(event):
     # ADD / REMOVE DESTINATION
     elif data.startswith("add_dest:") or data.startswith("add_destcust:") or data.startswith("rem_dest:"):
         action, d_id = data.split(":")[0], data.split(":")[1]
+        
         if action.startswith("add_"):
             d_name = data.split(":")[2] if len(data.split(":")) > 2 else "Channel"
             bot_db[uid]['dest_dict'][str(d_id)] = d_name
@@ -650,6 +638,7 @@ async def callback_handler(event):
             bot_db[uid]['dest_dict'].pop(str(d_id), None)
             
         save_bot_data()
+        
         is_custom = bool(bot_db[uid].get('source_dict'))
         more_action = b"more_destcust" if is_custom else b"more_dest"
         is_god = (bot_db[uid].get('setup_type') == 'god')
@@ -684,7 +673,7 @@ async def callback_handler(event):
         buttons.append([Button.inline("🔙 Back", back_route)])
         await event.edit("🎯 Agla **Destination Channel** select karein:\n\n*(Aap channel ka naam type bhi kar sakte hain)*", buttons=buttons)
 
-    # 🛠 FORWARDING MODE MENU
+    # 🛠 FORWARDING MODE MENU (NORMAL)
     elif data == "select_fwd_mode":
         await event.edit(
             "🛠 **Sniper Forwarding Mode:**\n\nAb choose karein format:\n"
@@ -692,7 +681,7 @@ async def callback_handler(event):
             "2️⃣ **Normal Mode:** Har Mono code ka alag msg\n"
             "3️⃣ **Link Forwarder:** Message se URLs in Mono",
             buttons=[
-                [Button.inline("🚀 Start Rush Mode", b"run_rush_0")], 
+                [Button.inline("🚀 Start Rush Mode", b"run_rush_0")],
                 [Button.inline("🟢 Normal Mode", b"ask_lines_normal")],
                 [Button.inline("🔗 Link Forwarder", b"ask_lines_link")],
                 [Button.inline("🔙 Back", b"back_to_mode")]
@@ -704,59 +693,11 @@ async def callback_handler(event):
         await event.edit(
             f"📏 **{mode.capitalize()} Mode - Line Settings:**\nAapko har item kitni lines me bhejna hai?",
             buttons=[
-                [Button.inline("1 Line", f"format_{mode}_1".encode()), Button.inline("2 Lines", f"format_{mode}_2".encode())],
-                [Button.inline("3 Lines", f"format_{mode}_3".encode()), Button.inline("4 Lines", f"format_{mode}_4".encode())],
+                [Button.inline("1 Line", f"run_{mode}_1".encode()), Button.inline("2 Lines", f"run_{mode}_2".encode())],
+                [Button.inline("3 Lines", f"run_{mode}_3".encode()), Button.inline("4 Lines", f"run_{mode}_4".encode())],
                 [Button.inline("🔙 Back", b"select_fwd_mode")]
             ]
         )
-
-    # 📝 FORMAT SETUP MENU (HEADER / FOOTER)
-    elif data.startswith("format_"):
-        parts = data.split("_")
-        bot_db[uid]['setup_mode_cache'] = parts[1]
-        bot_db[uid]['setup_lines_cache'] = int(parts[2])
-        save_bot_data()
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
-
-    elif data == "show_format_menu":
-        header = bot_db[uid].get('custom_header')
-        footer = bot_db[uid].get('custom_footer')
-        mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
-        lines_cache = bot_db[uid].get('setup_lines_cache', 4)
-
-        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text laga sakte hain.\n\n"
-        msg += f"🔝 **Header (First Line):**\n`{header}`\n\n" if header else "🔝 **Header:** ❌ Not Set\n\n"
-        msg += f"🔚 **Footer (Last Line):**\n`{footer}`\n\n" if footer else "🔚 **Footer:** ❌ Not Set\n\n"
-        
-        btns = [
-            [Button.inline("🔝 Set Header", b"ask_header"), Button.inline("🗑️ Remove Header", b"rem_header")],
-            [Button.inline("🔚 Set Footer", b"ask_footer"), Button.inline("🗑️ Remove Footer", b"rem_footer")],
-            [Button.inline("🚀 Start Bot", f"run_{mode_cache}_{lines_cache}".encode())],
-            [Button.inline("🔙 Cancel", b"select_fwd_mode")]
-        ]
-        
-        try: await event.edit(msg, buttons=btns)
-        except: await event.respond(msg, buttons=btns)
-
-    elif data == "rem_header":
-        bot_db[uid]['custom_header'] = None
-        save_bot_data()
-        await event.answer("Header Removed!", alert=True)
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
-        
-    elif data == "rem_footer":
-        bot_db[uid]['custom_footer'] = None
-        save_bot_data()
-        await event.answer("Footer Removed!", alert=True)
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
-
-    elif data == "ask_header":
-        prompt_msg = await event.edit("🔝 **Send Custom Header:**\n\nJo text aapko message ke sabse upar likhna hai, wo type karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"show_format_menu")]])
-        user_states[user_id] = {'state': 'WAITING_HEADER', 'prompt_id': prompt_msg.id}
-        
-    elif data == "ask_footer":
-        prompt_msg = await event.edit("🔚 **Send Custom Footer:**\n\nJo text aapko message ke sabse niche likhna hai, wo type karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"show_format_menu")]])
-        user_states[user_id] = {'state': 'WAITING_FOOTER', 'prompt_id': prompt_msg.id}
 
     # ⚡ GOD MODE DASHBOARD
     elif data == "setup_god_mode":
@@ -764,9 +705,13 @@ async def callback_handler(event):
         uname = bot_db[uid].get('replacer_username')
         
         msg = "⚡ **GOD MODE Setup:**\n\nIs mode me messages exactly same format me copy honge (Auto-replies, Auto-Edit & Auto-Delete included).\n\n"
+        
         link_str = f"`{link}`" if link else "❌ Not Set"
         uname_str = f"`{uname}`" if uname else "❌ Not Set"
-        msg += f"🔗 **Private Link:** {link_str}\n👤 **@Username:** {uname_str}\n\n"
+        
+        msg += f"🔗 **Private Link:** {link_str}\n"
+        msg += f"👤 **@Username:** {uname_str}\n\n"
+        msg += "Aap in dono ko apni custom Link/Username se replace karne ke liye set kar sakte hain."
         
         btns = [
             [Button.inline("🔗 Change Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
@@ -776,6 +721,7 @@ async def callback_handler(event):
         ]
         await event.edit(msg, buttons=btns)
 
+    # 🗑️ REMOVE HANDLERS
     elif data == "rem_replacer_link":
         bot_db[uid]['replacer_link'] = None
         save_bot_data()
@@ -788,12 +734,13 @@ async def callback_handler(event):
         await event.answer("Username Removed!", alert=True)
         await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
 
+    # ✍️ ASK HANDLERS
     elif data == "ask_replacer_link":
-        prompt_msg = await event.edit("🔗 **Send Custom Link:**\n\nKripya chat me apni wo Custom Link paste karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
+        prompt_msg = await event.edit("🔗 **Send Custom Link:**\n\nKripya chat me apni wo Custom Link paste karke bhejein jisse aap purani links ko replace karna chahte hain:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
         user_states[user_id] = {'state': 'WAITING_CLONE_LINK', 'prompt_id': prompt_msg.id}
 
     elif data == "ask_replacer_username":
-        prompt_msg = await event.edit("👤 **Send Custom @Username:**\n\nKripya chat me apna `@username` bhejein:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
+        prompt_msg = await event.edit("👤 **Send Custom @Username:**\n\nKripya chat me apna `@username` bhejein jisse aap source wale usernames ko replace karna chahte hain:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
         user_states[user_id] = {'state': 'WAITING_CLONE_USERNAME', 'prompt_id': prompt_msg.id}
 
     # START RUN
@@ -810,7 +757,7 @@ async def callback_handler(event):
         await event.edit(f"🚀 **Sniper Bot Start ho raha hai [{mode_disp} Mode]...**")
         await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count)
 
-# --- 💬 TEXT HANDLER ---
+# --- 💬 TEXT HANDLER (CLEAN UI & SEARCH) ---
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
     user_id = event.sender_id
@@ -876,6 +823,7 @@ async def handle_text(event):
     if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES', 'SELECT_DEST', 'SELECT_DEST_CUSTOM']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
+        
         query = text.lower()
         st = state.get('state')
         action_prefix = "add_destcust" if st == 'SELECT_DEST_CUSTOM' else "add_dest" if st == 'SELECT_DEST' else "add_source"
@@ -883,6 +831,7 @@ async def handle_text(event):
         
         try: await event.delete()
         except: pass
+        
         try:
             dialogs = await client.get_dialogs(limit=1000)
             buttons = []
@@ -902,45 +851,14 @@ async def handle_text(event):
                 await event.respond(f"🔍 **Search Results for '{text}':**\nSelect your channel below:", buttons=buttons)
             else:
                 await event.respond(f"❌ Koi channel nahi mila '{text}' ke naam se. Kripya sahi spelling ya @username bhejein.")
-        except Exception as e: pass
+        except Exception as e:
+            pass
         return
 
-    # 📝 CUSTOM HEADER / FOOTER SAVER
-    if isinstance(state, dict) and state.get('state') in ['WAITING_HEADER', 'WAITING_FOOTER']:
-        is_header = state.get('state') == 'WAITING_HEADER'
-        if is_header:
-            bot_db[uid]['custom_header'] = text
-            success_txt = "✅ **Header Saved Successfully!**"
-        else:
-            bot_db[uid]['custom_footer'] = text
-            success_txt = "✅ **Footer Saved Successfully!**"
-            
-        save_bot_data()
-        try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
-        except: pass
-        user_states[user_id] = None
-        
-        header = bot_db[uid].get('custom_header')
-        footer = bot_db[uid].get('custom_footer')
-        mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
-        lines_cache = bot_db[uid].get('setup_lines_cache', 4)
-
-        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\nAap message ke upar aur niche apna custom text laga sakte hain.\n\n"
-        msg += f"🔝 **Header (First Line):**\n`{header}`\n\n" if header else "🔝 **Header:** ❌ Not Set\n\n"
-        msg += f"🔚 **Footer (Last Line):**\n`{footer}`\n\n" if footer else "🔚 **Footer:** ❌ Not Set\n\n"
-        
-        btns = [
-            [Button.inline("🔝 Set Header", b"ask_header"), Button.inline("🗑️ Remove Header", b"rem_header")],
-            [Button.inline("🔚 Set Footer", b"ask_footer"), Button.inline("🗑️ Remove Footer", b"rem_footer")],
-            [Button.inline("🚀 Start Bot", f"run_{mode_cache}_{lines_cache}".encode())],
-            [Button.inline("🔙 Cancel", b"select_fwd_mode")]
-        ]
-        await event.respond(f"{success_txt}\n\n{msg}", buttons=btns)
-        return
-
-    # 🔗 CUSTOM LINK/USERNAME SAVER (GOD MODE)
+    # 🔗 CUSTOM LINK/USERNAME SAVER 
     if isinstance(state, dict) and state.get('state') in ['WAITING_CLONE_LINK', 'WAITING_CLONE_USERNAME']:
         is_link = state.get('state') == 'WAITING_CLONE_LINK'
+        
         if is_link:
             bot_db[uid]['replacer_link'] = text
             success_txt = "✅ **Link Saved Successfully!**"
@@ -950,15 +868,23 @@ async def handle_text(event):
             success_txt = "✅ **Username Saved Successfully!**"
             
         save_bot_data()
-        try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
+        
+        try:
+            await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
         except: pass
+        
         user_states[user_id] = None
         
         link = bot_db[uid].get('replacer_link')
         uname = bot_db[uid].get('replacer_username')
         
         msg = "⚡ **GOD MODE Setup:**\n\nIs mode me messages exactly same format me copy honge (Auto-replies, Auto-Edit & Auto-Delete included).\n\n"
-        msg += f"🔗 **Private Link:** {f'`{link}`' if link else '❌ Not Set'}\n👤 **@Username:** {f'`{uname}`' if uname else '❌ Not Set'}\n\n"
+        link_str = f"`{link}`" if link else "❌ Not Set"
+        uname_str = f"`{uname}`" if uname else "❌ Not Set"
+        
+        msg += f"🔗 **Private Link:** {link_str}\n"
+        msg += f"👤 **@Username:** {uname_str}\n\n"
+        msg += "Aap in dono ko apni custom Link/Username se replace karne ke liye set kar sakte hain."
         
         btns = [
             [Button.inline("🔗 Change Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
@@ -966,6 +892,7 @@ async def handle_text(event):
             [Button.inline("🚀 Start GOD MODE", b"run_god_0")],
             [Button.inline("🔙 Cancel Setup", b"mode_god_start")]
         ]
+        
         await event.respond(f"{success_txt}\n\n{msg}", buttons=btns)
         return
 
