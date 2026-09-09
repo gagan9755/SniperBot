@@ -703,7 +703,7 @@ async def callback_handler(event):
             "2️⃣ **Normal Mode:** Har Mono code ka alag msg\n"
             "3️⃣ **Link Forwarder:** Message se URLs in Mono",
             buttons=[
-                [Button.inline("🚀 Rush Mode", b"run_rush_0")], 
+                [Button.inline("🚀 Rush Mode", b"ask_timer_rush_0")], 
                 [Button.inline("🟢 Normal Mode", b"ask_lines_normal")],
                 [Button.inline("🔗 Link Forwarder", b"ask_lines_link")],
                 [Button.inline("🔙 Back", b"back_to_mode")]
@@ -722,51 +722,40 @@ async def callback_handler(event):
             ]
         )
 
-    # ⏱️ AUTO-OVER TIMER SETUP MENU
-    elif data.startswith("ask_timer_"):
+    # ⏱️ AUTO-OVER TIMER SETUP MENU (FIXED ROUTE)
+    elif data.startswith("format_"):
         await event.answer()
         parts = data.split("_")
-        bot_db[uid]['setup_mode_cache'] = parts[2]
-        bot_db[uid]['setup_lines_cache'] = int(parts[3])
-        save_bot_data()
+        mode = parts[1]
+        lines = parts[2]
         
+        # Line count ke baad ab Timer menu par jayega
         await event.edit(
             "⏱️ **Auto-Over Timer Setup:**\n\nKitne time baad message par ❌️❌️ OVER ❌️❌️ likh kar aa jana chahiye?",
             buttons=[
-                [Button.inline("⏳ 10 Seconds", b"set_timer_10"), Button.inline("⏳ 30 Seconds", b"set_timer_30")],
-                [Button.inline("⏱️ 1 Minute", b"set_timer_60"), Button.inline("⏱️ 5 Minutes", b"set_timer_300")],
-                [Button.inline("❌ No Timer (Never Over)", b"set_timer_0")],
+                [Button.inline("⏳ 10 Seconds", f"set_timer_{mode}_{lines}_10".encode()), Button.inline("⏳ 30 Seconds", f"set_timer_{mode}_{lines}_30".encode())],
+                [Button.inline("⏱️ 1 Minute", f"set_timer_{mode}_{lines}_60".encode()), Button.inline("⏱️ 5 Minutes", f"set_timer_{mode}_{lines}_300".encode())],
+                [Button.inline("❌ No Timer (Never Over)", f"set_timer_{mode}_{lines}_0".encode())],
                 [Button.inline("🔙 Back", b"select_fwd_mode")]
             ]
         )
 
     elif data.startswith("set_timer_"):
         await event.answer()
-        timer_val = int(data.split("_")[2])
+        parts = data.split("_")
+        mode_cache = parts[2]
+        lines_cache = int(parts[3])
+        timer_val = int(parts[4])
+        
+        bot_db[uid]['setup_mode_cache'] = mode_cache
+        bot_db[uid]['setup_lines_cache'] = lines_cache
         bot_db[uid]['over_timer'] = timer_val
         save_bot_data()
         
-        mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
-        if mode_cache == 'rush':
-            lines_cache = bot_db[uid].get('setup_lines_cache', 0)
-            client = user_data.get(user_id, {}).get('client')
-            dest_list = list(bot_db[uid]['dest_dict'].keys())
-            src_keys = list(bot_db[uid]['source_dict'].keys())
-            source_list = [int(s) for s in src_keys] if src_keys else None
-            await event.edit(f"🚀 **Sniper Bot Start ho raha hai [Rush Mode]...**")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, 'rush', lines_cache)
-        else:
-            await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
-
-    # 📝 FORMAT SETUP MENU (HEADER / FOOTER)
-    elif data.startswith("format_"):
-        await event.answer()
-        parts = data.split("_")
-        bot_db[uid]['setup_mode_cache'] = parts[1]
-        bot_db[uid]['setup_lines_cache'] = int(parts[2])
-        save_bot_data()
+        # Timer set hone ke baad ab Format Menu (Header/Footer) par jayega
         await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
 
+    # 📝 FORMAT SETUP MENU (HEADER / FOOTER)
     elif data == "show_format_menu":
         await event.answer()
         header = bot_db[uid].get('custom_header')
