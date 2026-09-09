@@ -79,7 +79,7 @@ def init_user_db(user_id):
             'replacer_username': None, 
             'custom_header': None, 
             'custom_footer': None, 
-            'over_timer': 0, 
+            'over_timer': 0, # ⏱️ Auto-Over Timer (in seconds)
             'setup_type': 'normal', 
             'setup_mode_cache': 'normal',
             'setup_lines_cache': 4,
@@ -96,24 +96,20 @@ def generate_key(days=0, hours=0):
     return key
 
 def is_user_authorized(user_id):
-    if user_id == MASTER_ID: return True # 👑 Admin bypass for global testing
     return str(user_id) in license_db["users"]
 
 def check_subscription(user_id):
-    if user_id == MASTER_ID: return True # 👑 Admin bypass for global testing
     if not is_user_authorized(user_id): return False
     expires_str = license_db["users"][str(user_id)]["expires"]
     return datetime.now() < datetime.fromisoformat(expires_str)
 
 def get_time_left(user_id):
-    if user_id == MASTER_ID: return timedelta(days=999) # 👑 Admin lifetime
     if not is_user_authorized(user_id): return None
     expires_str = license_db["users"][str(user_id)]["expires"]
     return datetime.fromisoformat(expires_str) - datetime.now()
 
 def format_time_left(td):
     if not td or int(td.total_seconds()) <= 0: return "Expired"
-    if td.days > 300: return "Lifetime (Admin)"
     days, hours = int(td.total_seconds()) // 86400, (int(td.total_seconds()) % 86400) // 3600
     return f"{days} Days" if days > 0 else f"{hours} Hours"
 
@@ -154,8 +150,7 @@ def get_admin_buttons():
         [Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
         [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🔗 Set Official Channel", b"adm_set_channel")],
         [Button.inline("🚫 Ban User", b"adm_ban_prompt"), Button.inline("✅ Unban User", b"adm_unban_prompt")],
-        [Button.inline("📢 Broadcast Message", b"adm_broadcast")],
-        [Button.inline("🧪 Admin Testing Mode", b"adm_testing_panel")] # 🛠️ Admin Testing Panel Button
+        [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
     ]
 
 # --- 🚀 DATA FETCHING (1000 LIMIT) ---
@@ -451,7 +446,7 @@ async def start_command(event):
     
     if user_id == MASTER_ID:
         user_states[user_id] = None 
-        await event.reply("👑 **MASTER ADMIN CONTROL PANEL** 👑\n\n*(Admin Testing Bypass Active)*", buttons=get_admin_buttons())
+        await event.reply("👑 **MASTER ADMIN CONTROL PANEL** 👑", buttons=get_admin_buttons())
         return
         
     if is_user_authorized(user_id):
@@ -496,16 +491,9 @@ async def callback_handler(event):
     uid = str(user_id)
     init_user_db(user_id)
 
-    # 👑 ADMIN ACTIONS & TESTING MODE BYPASS
+    # 👑 ADMIN ACTIONS
     if user_id == MASTER_ID:
-        if data == "adm_testing_panel":
-            user_states[user_id] = 'CHOOSE_MODE'
-            # Master ke liye master_bot ko hi client man kar testing ke liye session assign kar dete hain
-            if user_id not in user_data: user_data[user_id] = {}
-            user_data[user_id]['client'] = master_bot
-            await event.edit("🧪 **Admin Testing Mode Activated!**\n\nAap bina user login ke bot ke saare menus test kar sakte hain.\n\n🎯 Target Mode select karein:", buttons=get_mode_buttons())
-            return
-        elif data == "adm_gen_5_30":
+        if data == "adm_gen_5_30":
             generated = [f"`{generate_key(days=30)}`" for _ in range(5)]
             await event.edit("✅ **5 New Keys Generated:**\n\n" + "\n".join(generated), buttons=[[Button.inline("🔙 Back", b"adm_back")]])
             return
@@ -562,7 +550,7 @@ async def callback_handler(event):
     
     elif data == "ctl_mykey":
         if is_user_authorized(user_id):
-            info = license_db["users"].get(str(user_id), {"key": "ADMIN-LIFETIME-TEST-KEY"})
+            info = license_db["users"][str(user_id)]
             await event.answer(f"🔑 Key: {info['key']} | ⏳ Left: {format_time_left(get_time_left(user_id))}", alert=True)
             
     elif data == "ctl_stats": 
@@ -576,10 +564,7 @@ async def callback_handler(event):
         bot_db[uid]['is_running'] = False
         save_bot_data()
         user_states[user_id] = 'CHOOSE_MODE'
-        if user_id == MASTER_ID:
-            await event.edit(f"🔄 **Setup Restarted!**\n\n🎯 Apne kaam ke liye Target Mode select karein:", buttons=get_mode_buttons())
-        else:
-            await event.edit(f"🔄 **Setup Restarted!**\n\n🎯 Apne kaam ke liye Target Mode select karein:", buttons=get_mode_buttons())
+        await event.edit(f"🔄 **Setup Restarted!**\n\n🎯 Apne kaam ke liye Target Mode select karein:", buttons=get_mode_buttons())
 
     elif data == "back_to_mode":
         user_states[user_id] = 'CHOOSE_MODE'
@@ -738,7 +723,7 @@ async def callback_handler(event):
             ]
         )
 
-    # ⏱️ AUTO-OVER TIMER MENU (Naya Option - Normal Mode ke baad)
+    # ⏱️ AUTO-OVER TIMER SETUP MENU (Normal Mode ke baad)
     elif data.startswith("format_"):
         parts = data.split("_")
         mode_cache = parts[1]
