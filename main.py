@@ -641,7 +641,15 @@ async def callback_handler(event):
             del presets[pname]
             save_bot_data()
             await event.answer(f"Preset '{pname}' deleted!", alert=True)
-            await callback_handler(events.CallbackQuery.Event(data=b"list_presets", sender_id=user_id))
+            # Refresh list dynamically
+            if not presets:
+                await event.respond("📂 **Aapke paas koi saved preset nahi hai!**", buttons=[[Button.inline("🔙 Back", b"back_to_mode")]])
+            else:
+                btns = []
+                for pn in presets.keys():
+                    btns.append([Button.inline(f"📂 Load: {pn}", f"load_preset:{pn}".encode()), Button.inline(f"❌ Delete", f"del_preset:{pn}".encode())])
+                btns.append([Button.inline("🔙 Back", b"back_to_mode")])
+                await event.respond("📂 **Aapke Saved Presets:**\nNiche se apna setup select karein:", buttons=btns)
         return
 
     elif data == "ctl_mykey":
@@ -1152,19 +1160,24 @@ async def handle_text(event):
             except: await event.reply("⚠️ Format Error! (Ex: `1 12h` or `5 2d`)", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
-    # 🔐 SPECIAL KEY VERIFICATION
+    # 🔐 SPECIAL KEY VERIFICATION (FIXED LOGIC)
     if state == 'WAITING_SPECIAL_KEY':
-        if text in license_db["special_keys"]:
-            sk_info = license_db["special_keys"][text]
-            if sk_info["used_by"] and sk_info["used_by"] != user_id:
+        clean_text = text.strip()
+        if clean_text in license_db["special_keys"]:
+            sk_info = license_db["special_keys"][clean_text]
+            if sk_info["used_by"] and str(sk_info["used_by"]) != str(user_id):
                 await event.reply("❌ Ye Special Key pehle hi kisi aur dwara use ki ja chuki hai!")
                 return
-            license_db["special_keys"][text]["used_by"] = user_id
-            license_db["special_users"][str(user_id)] = {"key": text, "expires": sk_info["expires"]}
+            
+            # Save key usage and expiry properly to special_users
+            license_db["special_keys"][clean_text]["used_by"] = user_id
+            license_db["special_users"][uid] = {"key": clean_text, "expires": sk_info["expires"]}
             save_licenses(license_db)
+            
             user_states[user_id] = None
             try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
             except: pass
+            
             await event.respond(
                 "✅ **Special Key Verified Successfully!**\n🔐 Ab aap Special Code Mode use kar sakte hain.",
                 buttons=[[Button.inline("🔐 Open Special Code Setup", b"mode_special_start")]]
