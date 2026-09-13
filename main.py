@@ -641,7 +641,6 @@ async def callback_handler(event):
             del presets[pname]
             save_bot_data()
             await event.answer(f"Preset '{pname}' deleted!", alert=True)
-            # Refresh list dynamically
             if not presets:
                 await event.respond("📂 **Aapke paas koi saved preset nahi hai!**", buttons=[[Button.inline("🔙 Back", b"back_to_mode")]])
             else:
@@ -1160,8 +1159,12 @@ async def handle_text(event):
             except: await event.reply("⚠️ Format Error! (Ex: `1 12h` or `5 2d`)", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
-    # 🔐 SPECIAL KEY VERIFICATION (FIXED LOGIC)
-    if state == 'WAITING_SPECIAL_KEY':
+    # 🔐 SPECIAL KEY VERIFICATION (FIXED ROBUST CHECK)
+    is_waiting_special = False
+    if isinstance(state, dict) and state.get('state') == 'WAITING_SPECIAL_KEY':
+        is_waiting_special = True
+
+    if is_waiting_special:
         clean_text = text.strip()
         if clean_text in license_db["special_keys"]:
             sk_info = license_db["special_keys"][clean_text]
@@ -1169,7 +1172,6 @@ async def handle_text(event):
                 await event.reply("❌ Ye Special Key pehle hi kisi aur dwara use ki ja chuki hai!")
                 return
             
-            # Save key usage and expiry properly to special_users
             license_db["special_keys"][clean_text]["used_by"] = user_id
             license_db["special_users"][uid] = {"key": clean_text, "expires": sk_info["expires"]}
             save_licenses(license_db)
