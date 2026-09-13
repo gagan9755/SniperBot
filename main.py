@@ -173,8 +173,8 @@ def get_control_buttons(validity_str):
 def get_admin_buttons():
     return [
         [Button.inline("🔑 Gen 1 Key (30D)", b"adm_gen_1_30"), Button.inline("🔑 Gen 5 Keys (30D)", b"adm_gen_5_30")],
-        [Button.inline("🔐 Gen Special Key (30D)", b"adm_gen_sp_30"), Button.inline("👥 View Special Users", b"adm_special_users")],
-        [Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
+        [Button.inline("🔐 Gen Special Key (30D)", b"adm_gen_sp_30"), Button.inline("⚙️ Custom Special Key", b"adm_custom_sp_key")],
+        [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
         [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🔗 Set Official Channel", b"adm_set_channel")],
         [Button.inline("🚫 Ban User", b"adm_ban_prompt"), Button.inline("✅ Unban User", b"adm_unban_prompt")],
         [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
@@ -319,7 +319,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
             if not extracted_items: return
             
-            # Format according to user lines count
             c = extracted_items[0]
             body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
             messages_to_send.append({'text': body_text, 'media': None, 'is_special': True})
@@ -377,8 +376,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
                     messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
 
-        sent_msgs_this_event = {}
-        
         async def send_to_single_destination(d_id, target, item):
             try:
                 kwargs = {'link_preview': True}
@@ -525,7 +522,11 @@ async def callback_handler(event):
             return
         elif data == "adm_gen_sp_30":
             skey = generate_special_key(days=30)
-            await event.respond(f"🔐 **1 New Special Key Generated:**\n\n`{skey}`", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            await event.respond(f"🔐 **1 New Special Key (30 Days) Generated:**\n\n`{skey}`", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif data == "adm_custom_sp_key":
+            user_states[user_id] = 'WAITING_CUSTOM_SP_KEY'
+            await event.respond("⚙️ **Custom Special Key:**\nFormat: `<count> <time>` (jaise `1 12h` ya `5 2d`)", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
         elif data == "adm_special_users":
             msg = "🔐 **Active Special Code Users:**\n\n"
@@ -1138,6 +1139,17 @@ async def handle_text(event):
                 user_states[user_id] = None
                 await event.reply(f"✅ **{count} New Keys Generated:**\n\n" + "\n".join(generated), buttons=[[Button.inline("🔙 Back", b"adm_back")]])
             except: await event.reply("⚠️ Format Error! (Ex: `1 12h`)", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif state == 'WAITING_CUSTOM_SP_KEY':
+            try:
+                parts = text.lower().split()
+                count, time_str = int(parts[0]), parts[1]
+                hours = int(time_str[:-1]) if time_str.endswith('h') else 0
+                days = int(time_str[:-1]) if time_str.endswith('d') else int(time_str) if not hours else 0
+                generated = [f"`{generate_special_key(days=days, hours=hours)}`" for _ in range(count)]
+                user_states[user_id] = None
+                await event.reply(f"🔐 **{count} New Special Keys Generated:**\n\n" + "\n".join(generated), buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            except: await event.reply("⚠️ Format Error! (Ex: `1 12h` or `5 2d`)", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
     # 🔐 SPECIAL KEY VERIFICATION
