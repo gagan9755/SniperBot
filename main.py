@@ -76,7 +76,6 @@ def init_user_db(user_id):
             'sniper_mode': 'rush', 'lines_count': 4,
             'is_running': False, 'is_paused': False, 
             'replacer_link': None, 
-            'replacer_username': None, 
             'custom_header': None, 
             'custom_footer': None, 
             'over_timer': 0, 
@@ -254,19 +253,14 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 msg_html = text_content
 
             replacer_link = bot_db[uid].get('replacer_link')
-            replacer_uname = bot_db[uid].get('replacer_username')
-            
             if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-            if replacer_uname: 
-                # Replace only standalone usernames, keeping code/mono blocks safe
-                msg_html = re.sub(r'(?<!<code>)(?<!<pre>)(?<![a-zA-Z0-9_])@[a-zA-Z0-9_]+(?!<\/code>)(?!<\/pre>)', replacer_uname, msg_html)
 
             dest_map = sniper.msg_map[event.id]
             for d_id, sent_msg_id in dest_map.items():
                 target_entity = sniper.destinations.get(d_id)
                 if target_entity:
                     try:
-                        kwargs = {'parse_mode': 'html'}
+                        kwargs = {'parse_mode': 'html', 'link_preview': True}
                         if event.message.media: kwargs['file'] = event.message.media
                         await client.edit_message(target_entity, sent_msg_id, msg_html, **kwargs)
                     except: pass
@@ -304,7 +298,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         messages_to_send = []
         text_content = event.message.message or ""
 
-        # ⚡ GOD MODE (EXACT CLONE + SMART USERNAME & CLEAN MEDIA/STICKER/VOICE HANDLING)
+        # ⚡ GOD MODE (EXACT CLONE WITHOUT FORWARD TAG, CLEAN MEDIA/VOICE & LINK PREVIEW)
         if sniper.sniper_mode == "god":
             if not text_content and not event.message.media: return
             
@@ -314,18 +308,13 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 msg_html = text_content
                 
             replacer_link = bot_db[uid].get('replacer_link')
-            replacer_uname = bot_db[uid].get('replacer_username')
-            
             if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-            if replacer_uname: 
-                # Replace only standalone @usernames without breaking code/mono blocks
-                msg_html = re.sub(r'(?<!<code>)(?<!<pre>)(?<![a-zA-Z0-9_])@[a-zA-Z0-9_]+(?!<\/code>)(?!<\/pre>)', replacer_uname, msg_html)
                 
             messages_to_send.append({
                 'text': msg_html, 
                 'media': event.message.media, 
                 'is_god': True, 
-                'is_forward': (not text_content and event.message.media and not getattr(event.message, 'voice', None) and not getattr(event.message, 'sticker', None))
+                'is_forward': False
             })
 
         else:
@@ -370,35 +359,30 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         sent_msgs_this_event = {}
         reply_to_id = event.message.reply_to_msg_id
         
-        # 🚀 DUAL-HANDLING DISPATCHER (Single vs Parallel Smart Mode with Clean Link & Reply Support)
+        # 🚀 DUAL-HANDLING DISPATCHER (Single vs Parallel Smart Mode)
         async def send_to_single_destination(d_id, target, item):
             try:
                 dest_reply_id = None
                 if reply_to_id and reply_to_id in sniper.msg_map:
                     dest_reply_id = sniper.msg_map[reply_to_id].get(d_id)
                 
-                kwargs = {}
+                kwargs = {'link_preview': True}
                 if dest_reply_id: kwargs['reply_to'] = dest_reply_id
                 
-                if item.get('is_forward') and item['media']:
-                    sent_msg = await client.forward_messages(target, event.message)
-                    if sent_msg: return d_id, sent_msg.id
+                if item.get('is_god'):
+                    kwargs['parse_mode'] = 'html'
+                    if item['media']: kwargs['file'] = item['media']
+                    sent_msg = await client.send_message(target, item['text'], **kwargs)
                 else:
-                    if item.get('is_god'):
-                        kwargs['parse_mode'] = 'html'
-                        if item['media']: kwargs['file'] = item['media']
-                        # Ensure links are formatted cleanly as hyperlinks if needed, or sent directly with html unparse
-                        sent_msg = await client.send_message(target, item['text'], link_preview=True, **kwargs)
-                    else:
-                        kwargs['parse_mode'] = 'md'
-                        if item['media']: kwargs['file'] = item['media']
-                        sent_msg = await client.send_message(target, item['text'], link_preview=True, **kwargs)
-                        
-                    if sent_msg:
-                        timer_sec = bot_db[uid].get('over_timer', 0)
-                        if timer_sec > 0 and not item.get('is_god'):
-                            asyncio.create_task(auto_over_message(client, target, sent_msg.id, timer_sec))
-                        return d_id, sent_msg.id
+                    kwargs['parse_mode'] = 'md'
+                    if item['media']: kwargs['file'] = item['media']
+                    sent_msg = await client.send_message(target, item['text'], **kwargs)
+                    
+                if sent_msg:
+                    timer_sec = bot_db[uid].get('over_timer', 0)
+                    if timer_sec > 0 and not item.get('is_god'):
+                        asyncio.create_task(auto_over_message(client, target, sent_msg.id, timer_sec))
+                    return d_id, sent_msg.id
             except:
                 try:
                     sent_msg = await client.forward_messages(target, event.message)
@@ -518,11 +502,8 @@ async def callback_handler(event):
     uid = str(user_id)
     init_user_db(user_id)
 
-    # Clean up previous messages/menus to avoid chat clutter
-    try:
-        await event.delete()
-    except:
-        pass
+    try: await event.delete()
+    except: pass
 
     # 👑 ADMIN ACTIONS
     if user_id == MASTER_ID:
@@ -842,16 +823,13 @@ async def callback_handler(event):
     # ⚡ GOD MODE DASHBOARD
     elif data == "setup_god_mode":
         link = bot_db[uid].get('replacer_link')
-        uname = bot_db[uid].get('replacer_username')
         
         msg = "⚡ **GOD MODE Setup:**\n\nIs mode me messages exactly same format me copy honge (Auto-replies, Auto-Edit & Auto-Delete included).\n\n"
         link_str = f"`{link}`" if link else "❌ Not Set"
-        uname_str = f"`{uname}`" if uname else "❌ Not Set"
-        msg += f"🔗 **Private Link:** {link_str}\n👤 **@Username:** {uname_str}\n\n"
+        msg += f"🔗 **Private Link:** {link_str}\n\n"
         
         btns = [
             [Button.inline("🔗 Change Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
-            [Button.inline("👤 Change @Username", b"ask_replacer_username"), Button.inline("🗑️ Remove User", b"rem_replacer_username")],
             [Button.inline("🚀 Start GOD MODE", b"run_god_0")],
             [Button.inline("🔙 Cancel Setup", b"mode_god_start")]
         ]
@@ -863,19 +841,9 @@ async def callback_handler(event):
         await event.answer("Link Removed!", alert=True)
         await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
 
-    elif data == "rem_replacer_username":
-        bot_db[uid]['replacer_username'] = None
-        save_bot_data()
-        await event.answer("Username Removed!", alert=True)
-        await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
-
     elif data == "ask_replacer_link":
         prompt_msg = await event.respond("🔗 **Send Custom Link:**\n\nKripya chat me apni wo Custom Link paste karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
         user_states[user_id] = {'state': 'WAITING_CLONE_LINK', 'prompt_id': prompt_msg.id}
-
-    elif data == "ask_replacer_username":
-        prompt_msg = await event.respond("👤 **Send Custom @Username:**\n\nKripya chat me apna `@username` bhejein:", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
-        user_states[user_id] = {'state': 'WAITING_CLONE_USERNAME', 'prompt_id': prompt_msg.id}
 
     # START RUN
     elif data.startswith("run_"):
@@ -1019,16 +987,10 @@ async def handle_text(event):
         await event.respond(f"{success_txt}\n\n{msg}", buttons=btns)
         return
 
-    # 🔗 CUSTOM LINK/USERNAME SAVER (GOD MODE)
-    if isinstance(state, dict) and state.get('state') in ['WAITING_CLONE_LINK', 'WAITING_CLONE_USERNAME']:
-        is_link = state.get('state') == 'WAITING_CLONE_LINK'
-        if is_link:
-            bot_db[uid]['replacer_link'] = text
-            success_txt = "✅ **Link Saved Successfully!**"
-        else:
-            if not text.startswith('@'): text = '@' + text
-            bot_db[uid]['replacer_username'] = text
-            success_txt = "✅ **Username Saved Successfully!**"
+    # 🔗 CUSTOM LINK SAVER (GOD MODE)
+    if isinstance(state, dict) and state.get('state') == 'WAITING_CLONE_LINK':
+        bot_db[uid]['replacer_link'] = text
+        success_txt = "✅ **Link Saved Successfully!**"
             
         save_bot_data()
         try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
@@ -1036,14 +998,11 @@ async def handle_text(event):
         user_states[user_id] = None
         
         link = bot_db[uid].get('replacer_link')
-        uname = bot_db[uid].get('replacer_username')
-        
         msg = "⚡ **GOD MODE Setup:**\n\nIs mode me messages exactly same format me copy honge (Auto-replies, Auto-Edit & Auto-Delete included).\n\n"
-        msg += f"🔗 **Private Link:** {link if link else '❌ Not Set'}\n👤 **@Username:** {uname if uname else '❌ Not Set'}\n\n"
+        msg += f"🔗 **Private Link:** {link if link else '❌ Not Set'}\n\n"
         
         btns = [
             [Button.inline("🔗 Change Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
-            [Button.inline("👤 Change @Username", b"ask_replacer_username"), Button.inline("🗑️ Remove User", b"rem_replacer_username")],
             [Button.inline("🚀 Start GOD MODE", b"run_god_0")],
             [Button.inline("🔙 Cancel Setup", b"mode_god_start")]
         ]
