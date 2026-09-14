@@ -228,6 +228,7 @@ class UserSniper:
         self.processed_ids_queue = deque(maxlen=50)
         self.seen_codes_set = set()
         self.seen_codes_queue = deque(maxlen=100)
+        self.special_triggered = False # 🔒 Lock to ensure strictly 1st message only in Special Mode
         
         self.msg_map = {} 
         self.msg_map_keys = deque(maxlen=1000)
@@ -298,7 +299,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         text_content = event.message.message or ""
         messages_to_send = []
 
-        # 🔐 SPECIAL CODE MODE (Full Power, 1 Message, Auto-Stop)
+        # 🔐 SPECIAL CODE MODE (Strict 1st Message Only, Full Speed, Instant Stop)
         if sniper.sniper_mode == "special":
             if not is_special_authorized(user_id):
                 sniper.is_running = False
@@ -307,6 +308,10 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 if user_id in active_snipers_dict: del active_snipers_dict[user_id]
                 try: await master_bot.send_message(user_id, "⚠️ **Aapki Special Key expire ho chuki hai ya authorized nahi hai!**\nSpecial Code mode stop ho gaya hai.")
                 except: pass
+                return
+
+            # 🔒 Lock check: Agar pehle hi ek message trigger ho chuka hai, toh doosre/duplicate message ko seedha ignore kar do
+            if sniper.special_triggered:
                 return
 
             if not text_content: return
@@ -319,6 +324,9 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
             if not extracted_items: return
             
+            # Lock set kar diya taaki doosra message ignore ho jaye
+            sniper.special_triggered = True
+
             c = extracted_items[0]
             body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
             messages_to_send.append({'text': body_text, 'media': None, 'is_special': True})
@@ -405,14 +413,14 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 tasks = [send_to_single_destination(d_id, target, item) for d_id, target in sniper.destinations.items()]
                 await asyncio.gather(*tasks)
 
-        # 🛑 IF SPECIAL CODE MODE: FORWARD 1 MESSAGE AND STOP INSTANTLY
+        # 🛑 IF SPECIAL CODE MODE: FORWARD 1ST MESSAGE ONLY AND STOP INSTANTLY
         if sniper.sniper_mode == "special":
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
             save_bot_data()
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
             try:
-                await master_bot.send_message(user_id, "🎯 **Special Code successfully forwarded!**\n\nBot automatically stop ho gaya hai. Dobara use karne ke liye naya setup karein.")
+                await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**\n\nBot automatically stop ho gaya hai. Dobara use karne ke liye naya setup karein.")
             except: pass
             return
 
@@ -1159,7 +1167,7 @@ async def handle_text(event):
             except: await event.reply("⚠️ Format Error! (Ex: `1 12h` or `5 2d`)", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
-    # 🔐 SPECIAL KEY VERIFICATION (FIXED ROBUST CHECK)
+    # 🔐 SPECIAL KEY VERIFICATION
     is_waiting_special = False
     if isinstance(state, dict) and state.get('state') == 'WAITING_SPECIAL_KEY':
         is_waiting_special = True
