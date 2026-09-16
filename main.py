@@ -270,17 +270,25 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
     active_snipers_dict[user_id] = sniper
     asyncio.create_task(sniper.update_pinned_loop())
 
+    def remove_all_handlers():
+        try: client.remove_event_handler(handler)
+        except: pass
+        try: client.remove_event_handler(edit_handler)
+        except: pass
+        try: client.remove_event_handler(delete_handler)
+        except: pass
+
     @client.on(events.NewMessage())
     async def handler(event):
         if not sniper.is_running:
-            client.remove_event_handler(handler)
+            remove_all_handlers()
             return
 
         if not check_subscription(user_id):
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
             save_bot_data()
-            client.remove_event_handler(handler)
+            remove_all_handlers()
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
             try: await master_bot.send_message(user_id, "⚠️ **Aapki License Key expire ho chuki hai!**\nBot automatic stop ho gaya hai.")
             except: pass
@@ -343,7 +351,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
-            # ✅ BUG FIX: Agar koi link ya username replace nahi karna, toh exact original copy karo (Links will NOT break)
+            # ✅ Exact original copy if no replacer is used (Links will NOT break)
             if not replacer_link and not replacer_uname:
                 messages_to_send.append({'is_pure_god': True, 'msg_obj': event.message})
             else:
@@ -400,21 +408,34 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
                     messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
 
-        # ✅ BUG FIX: Smart Reply Mapper
+        # ✅ BUG FIX: Smart Reply & Quote Support
         reply_to_id = event.message.reply_to_msg_id
         sent_msgs_this_event = {}
 
         async def send_to_single_destination(d_id, target, item):
             try:
-                dest_reply_id = None
+                reply_obj = None
                 if reply_to_id and reply_to_id in sniper.msg_map:
                     dest_reply_id = sniper.msg_map[reply_to_id].get(d_id)
+                    if dest_reply_id:
+                        reply_obj = dest_reply_id
+                        # Check for Quote Reply (Small highlighted text reply)
+                        if hasattr(event.message, 'reply_to') and event.message.reply_to and getattr(event.message.reply_to, 'quote_text', None):
+                            try:
+                                reply_obj = types.InputReplyToMessage(
+                                    reply_to_msg_id=dest_reply_id,
+                                    quote_text=event.message.reply_to.quote_text,
+                                    quote_entities=event.message.reply_to.quote_entities,
+                                    quote_offset=getattr(event.message.reply_to, 'quote_offset', None)
+                                )
+                            except Exception:
+                                pass # fallback to normal reply if older telethon
 
                 kwargs = {'link_preview': True}
-                if dest_reply_id: kwargs['reply_to'] = dest_reply_id
+                if reply_obj: kwargs['reply_to'] = reply_obj
 
                 if item.get('is_pure_god'):
-                    sent_msg = await client.send_message(target, item['msg_obj'], reply_to=dest_reply_id)
+                    sent_msg = await client.send_message(target, item['msg_obj'], reply_to=reply_obj)
                 elif item.get('is_god'):
                     kwargs['parse_mode'] = 'html'
                     if item.get('media'): kwargs['file'] = item['media']
@@ -447,8 +468,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 results = await asyncio.gather(*tasks)
                 for res in results:
                     if res: sent_msgs_this_event[res[0]] = res[1]
-        
-        # Save message IDs for future replies
+
+        # Save ID map for Auto-Edit, Auto-Delete & Future Replies
         if sent_msgs_this_event:
             if len(sniper.msg_map_keys) >= 1000:
                 old_id = sniper.msg_map_keys.popleft()
@@ -468,6 +489,56 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**\n\nBot automatically stop ho gaya hai. Dobara use karne ke liye naya setup karein.")
             except: pass
             return
+
+    # 🛠 AUTO-EDIT HANDLER (God Mode Only)
+    @client.on(events.MessageEdited())
+    async def edit_handler(event):
+        if not sniper.is_running: return
+        if sniper.is_paused or sniper.sniper_mode != "god": return
+        if sniper.source_chat_ids and event.chat_id not in sniper.source_chat_ids: return
+        elif not sniper.source_chat_ids and event.chat_id not in sniper.pinned_chats: return
+
+        if event.id not in sniper.msg_map: return
+        
+        text_content = event.message.message or ""
+        replacer_link = bot_db[uid].get('replacer_link')
+        replacer_uname = bot_db[uid].get('replacer_username')
+        
+        try:
+            if not replacer_link and not replacer_uname:
+                # 100% Pure Clone Edit
+                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
+                    target = sniper.destinations.get(int(d_id))
+                    if target: await client.edit_message(target, dest_msg_id, text=event.message.text, formatting_entities=event.message.entities, file=event.message.media)
+            else:
+                msg_html = text_content
+                try: msg_html = html.unparse(text_content, event.message.entities)
+                except: pass
+                
+                if replacer_link: 
+                    msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+                    msg_html = re.sub(r'(https?://)?t\.me/joinchat/[a-zA-Z0-9_-]+', replacer_link, msg_html)
+                if replacer_uname: 
+                    msg_html = safe_replace_username(msg_html, replacer_uname)
+                
+                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
+                    target = sniper.destinations.get(int(d_id))
+                    if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media)
+        except Exception as e: pass
+
+    # 🗑️ AUTO-DELETE HANDLER (God Mode Only)
+    @client.on(events.MessageDeleted())
+    async def delete_handler(event):
+        if not sniper.is_running: return
+        if sniper.is_paused or sniper.sniper_mode != "god": return
+        
+        for deleted_id in event.deleted_ids:
+            if deleted_id in sniper.msg_map:
+                for d_id, dest_msg_id in sniper.msg_map[deleted_id].items():
+                    target = sniper.destinations.get(int(d_id))
+                    if target:
+                        try: await client.delete_messages(target, dest_msg_id)
+                        except: pass
 
     try:
         time_left = get_time_left(user_id)
