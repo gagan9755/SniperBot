@@ -413,13 +413,15 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     dest_reply_id = sniper.msg_map[reply_to_id].get(d_id)
                     if dest_reply_id:
                         reply_obj = dest_reply_id
-                        if hasattr(event.message, 'reply_to') and event.message.reply_to and getattr(event.message.reply_to, 'quote_text', None):
+                        reply_meta = getattr(event.message, 'reply_to', None)
+                        # Exact Quote Formatting
+                        if reply_meta and getattr(reply_meta, 'quote_text', None):
                             try:
                                 reply_obj = types.InputReplyToMessage(
                                     reply_to_msg_id=dest_reply_id,
-                                    quote_text=event.message.reply_to.quote_text,
-                                    quote_entities=event.message.reply_to.quote_entities,
-                                    quote_offset=getattr(event.message.reply_to, 'quote_offset', None)
+                                    quote_text=reply_meta.quote_text,
+                                    quote_entities=getattr(reply_meta, 'quote_entities', []),
+                                    quote_offset=getattr(reply_meta, 'quote_offset', 0)
                                 )
                             except Exception:
                                 reply_obj = dest_reply_id # Fail safe
@@ -429,7 +431,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
                 if item.get('is_pure_god'):
                     msg_text = item['msg_obj'].message or ""
-                    kwargs['formatting_entities'] = item['msg_obj'].entities
+                    # 🛠️ ERROR FIX: Only add formatting_entities if they exist
+                    if item['msg_obj'].entities: kwargs['formatting_entities'] = item['msg_obj'].entities
                     if item['msg_obj'].media: kwargs['file'] = item['msg_obj'].media
                 else:
                     msg_text = item['text'] or ""
@@ -440,18 +443,22 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 try:
                     sent_msg = await client.send_message(target, msg_text, **kwargs)
                 except Exception as e:
-                    # 🛡️ FALLBACK 1: Quote failed? Bhej do Normal Reply banakar!
+                    # 🛡️ FALLBACK 1: Quote failed? Try Normal Reply
                     if 'reply_to' in kwargs and isinstance(kwargs['reply_to'], types.InputReplyToMessage):
                         kwargs['reply_to'] = kwargs['reply_to'].reply_to_msg_id
-                        try:
-                            sent_msg = await client.send_message(target, msg_text, **kwargs)
+                        try: sent_msg = await client.send_message(target, msg_text, **kwargs)
                         except Exception: pass
                     
-                    # 🛡️ FALLBACK 2: Reply hi fail ho gaya (Purana msg tha)? Toh Fresh Message ki tarah bhej do!
+                    # 🛡️ FALLBACK 2: Entities failed? (Removed to prevent crash)
+                    if not sent_msg and 'formatting_entities' in kwargs:
+                        del kwargs['formatting_entities']
+                        try: sent_msg = await client.send_message(target, msg_text, **kwargs)
+                        except Exception: pass
+
+                    # 🛡️ FALLBACK 3: Normal reply failed? (E.g. Old message) -> Send Fresh Message!
                     if not sent_msg and 'reply_to' in kwargs:
                         del kwargs['reply_to']
-                        try:
-                            sent_msg = await client.send_message(target, msg_text, **kwargs)
+                        try: sent_msg = await client.send_message(target, msg_text, **kwargs)
                         except Exception: pass
 
                 if sent_msg:
@@ -513,7 +520,10 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if not replacer_link and not replacer_uname:
                 for d_id, dest_msg_id in sniper.msg_map[event.id].items():
                     target = sniper.destinations.get(int(d_id))
-                    if target: await client.edit_message(target, dest_msg_id, text=text_content, formatting_entities=event.message.entities, file=event.message.media)
+                    if target:
+                        edit_kwargs = {'text': text_content, 'file': event.message.media}
+                        if event.message.entities: edit_kwargs['formatting_entities'] = event.message.entities
+                        await client.edit_message(target, dest_msg_id, **edit_kwargs)
             else:
                 msg_html = text_content
                 try: msg_html = html.unparse(text_content, event.message.entities)
