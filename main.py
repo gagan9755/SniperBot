@@ -5,6 +5,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, types, Button
 from telethon.tl.types import MessageEntityCode, MessageEntityPre
+from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, FloodWaitError
 from telethon.extensions import html
 from flask import Flask
@@ -30,43 +31,56 @@ BOT_TOKEN = '8546884710:AAF1lcYQwJiu0q0KWpwvK95MxuncBfXzg34'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
+# 🌐 MONGODB CONFIGURATION (Yahan apna URL daal do)
+MONGO_URI = "mongodb+srv://gkgamer12697_db_user:pPNrOmU6ueOs6Mc0@projectmybot.zujl82m.mongodb.net/?appName=ProjectMyBot"
+
+try:
+    from pymongo import MongoClient
+    mongo_client = MongoClient(MONGO_URI)
+    db = mongo_client["master_sniper_db"]
+    licenses_col = db["licenses"]
+    bot_data_col = db["bot_data"]
+    sessions_col = db["sessions"]
+    print("✅ Connected to MongoDB successfully!")
+except Exception as e:
+    print(f"❌ MongoDB Connection Error: {e}")
+
 master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
 
 user_states = {}
 user_data = {}  
 active_snipers_dict = {}
 
-# --- 🔐 DATABASES ---
-LICENSE_FILE = "licenses.json"
-BOT_DATA_FILE = "bot_data.json"
-
+# --- 🔐 DATABASES (Cloud-Backed) ---
 def load_licenses():
     try:
-        with open(LICENSE_FILE, 'r') as f:
-            data = json.load(f)
-            if "settings" not in data: data["settings"] = {"official_channel": ""}
-            if "special_keys" not in data: data["special_keys"] = {}
-            if "special_users" not in data: data["special_users"] = {}
+        data = licenses_col.find_one({"_id": "config"})
+        if data:
+            data.pop("_id", None)
             return data
-    except FileNotFoundError:
-        return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
+    except: pass
+    return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
 
 def save_licenses(data):
-    with open(LICENSE_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
+    try:
+        licenses_col.update_one({"_id": "config"}, {"$set": data}, upsert=True)
+    except: pass
 
 license_db = load_licenses()
 
 def load_bot_data():
     try:
-        with open(BOT_DATA_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
+        data = bot_data_col.find_one({"_id": "db"})
+        if data:
+            data.pop("_id", None)
+            return data
+    except: pass
+    return {}
 
 def save_bot_data():
-    with open(BOT_DATA_FILE, 'w') as f:
-        json.dump(bot_db, f, indent=4)
+    try:
+        bot_data_col.update_one({"_id": "db"}, {"$set": bot_db}, upsert=True)
+    except: pass
 
 bot_db = load_bot_data()
 
@@ -90,6 +104,20 @@ def init_user_db(user_id):
             'stats': {'forwarded': 0}
         }
         save_bot_data()
+
+# --- ☁️ STRING SESSION HELPERS ---
+def load_user_session(user_id):
+    try:
+        res = sessions_col.find_one({"user_id": str(user_id)})
+        if res and "session_string" in res:
+            return res["session_string"]
+    except: pass
+    return None
+
+def save_user_session(user_id, string_session):
+    try:
+        sessions_col.update_one({"user_id": str(user_id)}, {"$set": {"session_string": string_session}}, upsert=True)
+    except: pass
 
 # --- 🔐 LICENSE LOGIC ---
 def generate_key(days=0, hours=0):
@@ -414,7 +442,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if dest_reply_id:
                         reply_obj = dest_reply_id
                         reply_meta = getattr(event.message, 'reply_to', None)
-                        # Exact Quote Formatting
                         if reply_meta and getattr(reply_meta, 'quote_text', None):
                             try:
                                 reply_obj = types.InputReplyToMessage(
@@ -424,14 +451,13 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                                     quote_offset=getattr(reply_meta, 'quote_offset', 0)
                                 )
                             except Exception:
-                                reply_obj = dest_reply_id # Fail safe
+                                reply_obj = dest_reply_id 
 
                 kwargs = {'link_preview': True}
                 if reply_obj: kwargs['reply_to'] = reply_obj
 
                 if item.get('is_pure_god'):
                     msg_text = item['msg_obj'].message or ""
-                    # 🛠️ ERROR FIX: Only add formatting_entities if they exist
                     if item['msg_obj'].entities: kwargs['formatting_entities'] = item['msg_obj'].entities
                     if item['msg_obj'].media: kwargs['file'] = item['msg_obj'].media
                 else:
@@ -443,19 +469,16 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 try:
                     sent_msg = await client.send_message(target, msg_text, **kwargs)
                 except Exception as e:
-                    # 🛡️ FALLBACK 1: Quote failed? Try Normal Reply
                     if 'reply_to' in kwargs and isinstance(kwargs['reply_to'], types.InputReplyToMessage):
                         kwargs['reply_to'] = kwargs['reply_to'].reply_to_msg_id
                         try: sent_msg = await client.send_message(target, msg_text, **kwargs)
                         except Exception: pass
                     
-                    # 🛡️ FALLBACK 2: Entities failed? (Removed to prevent crash)
                     if not sent_msg and 'formatting_entities' in kwargs:
                         del kwargs['formatting_entities']
                         try: sent_msg = await client.send_message(target, msg_text, **kwargs)
                         except Exception: pass
 
-                    # 🛡️ FALLBACK 3: Normal reply failed? (E.g. Old message) -> Send Fresh Message!
                     if not sent_msg and 'reply_to' in kwargs:
                         del kwargs['reply_to']
                         try: sent_msg = await client.send_message(target, msg_text, **kwargs)
@@ -481,7 +504,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 for res in results:
                     if res: sent_msgs_this_event[res[0]] = res[1]
 
-        # Save ID map for Auto-Edit, Auto-Delete & Future Replies
         if sent_msgs_this_event:
             if len(sniper.msg_map_keys) >= 1000:
                 old_id = sniper.msg_map_keys.popleft()
@@ -491,7 +513,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             bot_db[uid]['stats']['forwarded'] += 1
             save_bot_data()
 
-        # 🛑 IF SPECIAL CODE MODE: FORWARD 1ST MESSAGE ONLY AND STOP INSTANTLY
         if sniper.sniper_mode == "special":
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
@@ -502,7 +523,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             except: pass
             return
 
-    # 🛠 AUTO-EDIT HANDLER (God Mode Only)
     @client.on(events.MessageEdited())
     async def edit_handler(event):
         if not sniper.is_running: return
@@ -540,7 +560,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media)
         except Exception as e: pass
 
-    # 🗑️ AUTO-DELETE HANDLER (God Mode Only)
     @client.on(events.MessageDeleted())
     async def delete_handler(event):
         if not sniper.is_running: return
@@ -578,7 +597,8 @@ async def auto_resume_snipers():
     for uid_str, data in bot_db.items():
         if data.get('is_running') and check_subscription(uid_str) and data.get('sniper_mode') != 'special':
             user_id = int(uid_str)
-            client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
+            session_str = load_user_session(user_id)
+            client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
             try:
                 await client.connect()
                 if await client.is_user_authorized():
@@ -614,9 +634,10 @@ async def start_command(event):
                 await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke liye niche buttons use karein:", buttons=get_control_buttons(validity_str))
                 return
 
+            session_str = load_user_session(user_id)
             client = user_data.get(user_id, {}).get('client')
             if not client:
-                client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
+                client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
                 await client.connect()
                 
             if await client.is_user_authorized():
@@ -1224,7 +1245,7 @@ async def callback_handler(event):
         await event.respond(f"🚀 **Sniper Bot Start ho raha hai [{mode_disp} Mode]...**")
         await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count)
 
-# --- 💬 TEXT HANDLER ---
+# --- 💬 TEXT HANDLER & SMART LOGIN WITH STRING SESSION ---
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
     user_id = event.sender_id
@@ -1470,9 +1491,10 @@ async def handle_text(event):
             license_db["users"][str(user_id)] = {"name": event.sender.first_name, "key": text, "expires": k_info["expires"]}
             save_licenses(license_db)
             
+            session_str = load_user_session(user_id)
             client = user_data.get(user_id, {}).get('client')
             if not client:
-                client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
+                client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
                 await client.connect()
                 
             if await client.is_user_authorized():
@@ -1491,7 +1513,7 @@ async def handle_text(event):
         user_states[user_id] = {'state': 'WAITING_OTP', 'phone': text}
         await event.reply("🔄 OTP bhej rahe hain...")
         try:
-            client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
+            client = TelegramClient(StringSession(), API_ID, API_HASH)
             await client.connect()
             sent = await client.send_code_request(text)
             if user_id not in user_data: user_data[user_id] = {}
@@ -1505,9 +1527,15 @@ async def handle_text(event):
 
     elif isinstance(state, dict) and state.get('state') == 'WAITING_OTP':
         try:
-            await user_data[user_id]['client'].sign_in(phone=state['phone'], code=text, phone_code_hash=user_data[user_id]['phone_code_hash'])
+            client = user_data[user_id]['client']
+            await client.sign_in(phone=state['phone'], code=text, phone_code_hash=user_data[user_id]['phone_code_hash'])
+            
+            # ☁️ SAVE STRING SESSION TO MONGODB
+            session_string = client.session.save()
+            save_user_session(user_id, session_string)
+
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(f"✅ Login Successful!\n🎯 Ab Target Mode select karein:", buttons=get_mode_buttons(user_id))
+            await event.reply(f"✅ Login Successful! (Session Saved to Cloud ☁️)\n🎯 Ab Target Mode select karein:", buttons=get_mode_buttons(user_id))
         except SessionPasswordNeededError:
             user_states[user_id] = {'state': 'WAITING_PASSWORD'}
             await event.reply("🔒 2-Step Verification Password bhejein:")
@@ -1517,14 +1545,20 @@ async def handle_text(event):
 
     elif isinstance(state, dict) and state.get('state') == 'WAITING_PASSWORD':
         try:
-            await user_data[user_id]['client'].sign_in(password=text)
+            client = user_data[user_id]['client']
+            await client.sign_in(password=text)
+            
+            # ☁️ SAVE STRING SESSION TO MONGODB
+            session_string = client.session.save()
+            save_user_session(user_id, session_string)
+
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(f"✅ Password Verified!\n🎯 Target Mode select karein:", buttons=get_mode_buttons(user_id))
+            await event.reply(f"✅ Password Verified! (Session Saved to Cloud ☁️)\n🎯 Ab Target Mode select karein:", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
 
-print("👑 Master Bot Initialized Successfully!")
+print("👑 Master Bot Initialized Successfully with MongoDB Cloud!")
 master_bot.start(bot_token=BOT_TOKEN)
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
