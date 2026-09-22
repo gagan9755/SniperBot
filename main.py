@@ -31,7 +31,7 @@ BOT_TOKEN = '8546884710:AAF1lcYQwJiu0q0KWpwvK95MxuncBfXzg34'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
-# 🌐 MONGODB CONFIGURATION (Yahan apna URL daal do)
+# 🌐 MONGODB CONFIGURATION
 MONGO_URI = "mongodb+srv://gkgamer12697_db_user:pPNrOmU6ueOs6Mc0@projectmybot.zujl82m.mongodb.net/?appName=ProjectMyBot"
 
 try:
@@ -885,11 +885,11 @@ async def callback_handler(event):
             ]
         )
 
-    # 🎯 TARGET SELECTION
+    # 🎯 TARGET SELECTION (BUG FIX: Resetting source_dict properly for pinned mode)
     elif data in ["mode_pinned", "god_mode_pinned"]:
         is_god = data.startswith("god_")
         bot_db[uid]['setup_type'] = 'god' if is_god else 'normal'
-        bot_db[uid]['source_dict'] = {}
+        bot_db[uid]['source_dict'] = {} # Pinned mode doesn't use specific source dict
         save_bot_data()
         
         user_states[user_id] = {'state': 'SELECT_DEST'}
@@ -1012,7 +1012,7 @@ async def callback_handler(event):
         if not bot_db[uid]['source_dict']: src_msg += "*(Koi source baki nahi hai)*\n"
         src_buttons.append([Button.inline("➕ Add Source", b"more_source")])
         if bot_db[uid]['source_dict']: src_buttons.append([Button.inline("🎯 Done, Select Destination", b"done_sources")])
-        src_buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
+        src_buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
         await event.respond(src_msg, buttons=src_buttons)
 
     elif data == "more_source":
