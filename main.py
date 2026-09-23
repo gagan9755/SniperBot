@@ -208,7 +208,7 @@ def get_admin_buttons():
         [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
     ]
 
-# --- 🚀 DATA FETCHING (1000 LIMIT) ---
+# --- 🚀 DATA FETCHING (1000 LIMIT WITH SEARCH INSTRUCTION) ---
 async def get_channel_buttons(client, action_type, require_admin=False, pinned_only=False):
     try:
         dialogs = await client.get_dialogs(limit=1000)
@@ -219,7 +219,7 @@ async def get_channel_buttons(client, action_type, require_admin=False, pinned_o
                 if require_admin and not (getattr(d.entity, 'creator', False) or getattr(d.entity, 'admin_rights', None)): continue
                 name = d.name[:20] if d.name else "Unnamed"
                 buttons.append([Button.inline(name, data=f"{action_type}:{d.id}:{name[:15]}")])
-                if len(buttons) >= 60: break
+                if len(buttons) >= 50: break
         return buttons
     except: return []
 
@@ -865,14 +865,14 @@ async def callback_handler(event):
             if client and client.is_connected():
                 buttons = await get_channel_buttons(client, "add_source_sp", pinned_only=True)
                 buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-                await event.respond("🎯 **Special Code Mode:**\n📥 Apna Source Channel select karein:", buttons=buttons)
+                await event.respond("🎯 **Special Code Mode:**\n📥 Apna Source Channel select karein\n*(Ya channel ka naam chat me type karke search karein):*", buttons=buttons)
         else:
             user_states[user_id] = {'state': 'SELECT_DEST_SP'}
             client = user_data.get(user_id, {}).get('client')
             if client and client.is_connected():
                 buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
                 buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-                await event.respond("🎯 **Special Code Mode:**\n📌 Apna Destination Channel select karein:", buttons=buttons)
+                await event.respond("🎯 **Special Code Mode:**\n📌 Apna Destination Channel select karein\n*(Ya channel ka naam chat me type karke search karein):*", buttons=buttons)
 
     # ⚡ GOD MODE START
     elif data == "mode_god_start":
@@ -885,11 +885,11 @@ async def callback_handler(event):
             ]
         )
 
-    # 🎯 TARGET SELECTION (BUG FIX: Resetting source_dict properly for pinned mode)
+    # 🎯 TARGET SELECTION
     elif data in ["mode_pinned", "god_mode_pinned"]:
         is_god = data.startswith("god_")
         bot_db[uid]['setup_type'] = 'god' if is_god else 'normal'
-        bot_db[uid]['source_dict'] = {} # Pinned mode doesn't use specific source dict
+        bot_db[uid]['source_dict'] = {}
         save_bot_data()
         
         user_states[user_id] = {'state': 'SELECT_DEST'}
@@ -899,7 +899,7 @@ async def callback_handler(event):
             buttons = await get_channel_buttons(client, "add_dest", require_admin=True)
             buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
             title_prefix = "⚡ GOD MODE: " if is_god else ""
-            await event.respond(f"{title_prefix}📌 **Pinned Mode:**\n🎯 Apna Destination select karein:", buttons=buttons)
+            await event.respond(f"{title_prefix}📌 **Pinned Mode:**\n🎯 Apna Destination select karein\n*(Ya channel ka naam chat me type karke search karein):*", buttons=buttons)
         else: await event.respond("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif data in ["mode_source", "god_mode_source"]:
@@ -914,7 +914,7 @@ async def callback_handler(event):
             buttons = await get_channel_buttons(client, "add_source", pinned_only=True)
             buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
             title_prefix = "⚡ GOD MODE: " if is_god else ""
-            await event.respond(f"{title_prefix}🎯 **Specific Source Mode:**\n📥 Apna Source select karein:", buttons=buttons)
+            await event.respond(f"{title_prefix}🎯 **Specific Source Mode:**\n📥 Apna Source select karein\n*(Ya channel ka naam chat me type karke search karein):*", buttons=buttons)
         else: await event.respond("📱 Pehle apna Telegram Phone Number bhejein:")
 
     # SPECIAL SOURCE / DESTINATION CALLBACKS
@@ -944,14 +944,14 @@ async def callback_handler(event):
         client = user_data.get(user_id, {}).get('client')
         buttons = await get_channel_buttons(client, "add_source_sp", pinned_only=True)
         buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-        await event.respond("🎯 Agla **PINNED Source Channel** select karein:", buttons=buttons)
+        await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karke search karein):*", buttons=buttons)
 
     elif data == "done_sources_sp":
         user_states[user_id] = {'state': 'SELECT_DEST_SP'}
         client = user_data.get(user_id, {}).get('client')
         buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
         buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-        await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein:", buttons=buttons)
+        await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein\n*(Ya naam type karke search karein):*", buttons=buttons)
 
     elif data.startswith("add_dest_sp:") or data.startswith("rem_dest_sp:"):
         action, d_id = data.split(":")[0], data.split(":")[1]
@@ -979,7 +979,7 @@ async def callback_handler(event):
         client = user_data.get(user_id, {}).get('client')
         buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
         buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-        await event.respond("🎯 Agla **Destination Channel** select karein:", buttons=buttons)
+        await event.respond("🎯 Agla **Destination Channel** select karein\n*(Ya naam type karke search karein):*", buttons=buttons)
 
     elif data == "ask_lines_special":
         await event.respond(
@@ -1021,7 +1021,7 @@ async def callback_handler(event):
         is_god = (bot_db[uid].get('setup_type') == 'god')
         buttons = await get_channel_buttons(client, "add_source", pinned_only=True)
         buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
-        await event.respond("🎯 Agla **PINNED Source Channel** select karein:", buttons=buttons)
+        await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karke search karein):*", buttons=buttons)
 
     elif data == "done_sources":
         user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM'}
@@ -1029,7 +1029,7 @@ async def callback_handler(event):
         is_god = (bot_db[uid].get('setup_type') == 'god')
         buttons = await get_channel_buttons(client, "add_destcust", require_admin=True)
         buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
-        await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein:", buttons=buttons)
+        await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein\n*(Ya naam type karke search karein):*", buttons=buttons)
 
     # ADD / REMOVE DESTINATION
     elif data.startswith("add_dest:") or data.startswith("add_destcust:") or data.startswith("rem_dest:"):
@@ -1073,7 +1073,7 @@ async def callback_handler(event):
         
         buttons = await get_channel_buttons(client, "add_destcust" if is_custom else "add_dest", require_admin=True)
         buttons.append([Button.inline("🔙 Back", back_route)])
-        await event.respond("🎯 Agla **Destination Channel** select karein:", buttons=buttons)
+        await event.respond("🎯 Agla **Destination Channel** select karein\n*(Ya naam type karke search karein):*", buttons=buttons)
 
     # 🛠 FORWARDING MODE MENU
     elif data == "select_fwd_mode":
@@ -1372,7 +1372,7 @@ async def handle_text(event):
         await event.respond(f"✅ **Preset '{pname}' Saved Successfully!**", buttons=[[Button.inline("📂 View Presets", b"list_presets"), Button.inline("🔙 Back", b"back_to_mode")]])
         return
 
-    # 🔍 TEXT SEARCH FOR CHANNELS
+    # 🔍 TEXT SEARCH FOR CHANNELS (FIXED & IMPROVED)
     if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES', 'SELECT_DEST', 'SELECT_DEST_CUSTOM', 'SELECT_SOURCES_SP', 'SELECT_DEST_SP']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
@@ -1387,8 +1387,6 @@ async def handle_text(event):
         
         require_admin = st in ['SELECT_DEST', 'SELECT_DEST_CUSTOM', 'SELECT_DEST_SP']
         
-        try: await event.delete()
-        except: pass
         try:
             dialogs = await client.get_dialogs(limit=1000)
             buttons = []
