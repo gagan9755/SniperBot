@@ -109,15 +109,14 @@ def init_user_db(user_id):
         }
         save_bot_data()
 
-# --- ☁️ STRING SESSION HELPERS WITH DEBUG LOGS ---
+# --- ☁️ STRING SESSION HELPERS ---
 def load_user_session(user_id):
     try:
         res = sessions_col.find_one({"user_id": str(user_id)})
         if res and "session_string" in res:
-            print(f"☁️ Loaded session for user {user_id} from MongoDB.")
             return res["session_string"]
     except Exception as e:
-        print(f"❌ load_user_session Error for {user_id}: {e}")
+        print(f"❌ load_user_session Error: {e}")
     return None
 
 def save_user_session(user_id, string_session):
@@ -127,9 +126,8 @@ def save_user_session(user_id, string_session):
             {"$set": {"session_string": string_session}}, 
             upsert=True
         )
-        print(f"✅ Successfully saved session for user {user_id} to MongoDB!")
     except Exception as e:
-        print(f"❌ CRITICAL: Failed to save session for user {user_id}: {e}")
+        print(f"❌ save_user_session Error: {e}")
 
 # --- 🔐 LICENSE LOGIC ---
 def generate_key(days=0, hours=0):
@@ -861,14 +859,14 @@ async def callback_handler(event):
             if client and client.is_connected():
                 buttons = await get_channel_buttons(client, "add_source_sp", pinned_only=True)
                 buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-                await event.respond("🎯 **Special Code Mode:**\n📥 Apna Source Channel select karein\n*(Ya channel ka naam chat me type karein):*", buttons=buttons)
+                await event.respond("🎯 **Special Code Mode:**\n📥 Apna Source Channel select karein\n*(Ya channel ka naam type karein / Source message forward karein):*", buttons=buttons)
         else:
             user_states[user_id] = {'state': 'SELECT_DEST_SP'}
             client = user_data.get(user_id, {}).get('client')
             if client and client.is_connected():
                 buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
                 buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-                await event.respond("🎯 **Special Code Mode:**\n📌 Apna Destination Channel select karein\n*(Ya channel ka naam chat me type karein):*", buttons=buttons)
+                await event.respond("🎯 **Special Code Mode:**\n📌 Apna Destination Channel select karein\n*(Ya channel ka naam type karein):*", buttons=buttons)
 
     elif data == "mode_god_start":
         await event.respond(
@@ -891,9 +889,9 @@ async def callback_handler(event):
         
         if client and client.is_connected():
             buttons = await get_channel_buttons(client, "add_dest", require_admin=True)
-            buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
+            buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"mode_to_mode")])
             title_prefix = "⚡ GOD MODE: " if is_god else ""
-            await event.respond(f"{title_prefix}📌 **Pinned Mode:**\n🎯 Apna Destination select karein\n*(Ya channel ka naam chat me type karein):*", buttons=buttons)
+            await event.respond(f"{title_prefix}📌 **Pinned Mode:**\n🎯 Apna Destination select karein\n*(Ya channel ka naam type karein):*", buttons=buttons)
         else: await event.respond("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif data in ["mode_source", "god_mode_source"]:
@@ -908,7 +906,7 @@ async def callback_handler(event):
             buttons = await get_channel_buttons(client, "add_source", pinned_only=True)
             buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
             title_prefix = "⚡ GOD MODE: " if is_god else ""
-            await event.respond(f"{title_prefix}🎯 **Specific Source Mode:**\n📥 Apna Source select karein\n*(Ya channel ka naam chat me type karein):*", buttons=buttons)
+            await event.respond(f"{title_prefix}🎯 **Specific Source Mode:**\n📥 Apna Source select karein\n*(Ya channel ka naam type karein / Source message forward karein):*", buttons=buttons)
         else: await event.respond("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif data.startswith("add_source_sp:") or data.startswith("rem_source_sp:"):
@@ -937,7 +935,7 @@ async def callback_handler(event):
         client = user_data.get(user_id, {}).get('client')
         buttons = await get_channel_buttons(client, "add_source_sp", pinned_only=True)
         buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-        await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karein):*", buttons=buttons)
+        await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karein / message forward karein):*", buttons=buttons)
 
     elif data == "done_sources_sp":
         user_states[user_id] = {'state': 'SELECT_DEST_SP'}
@@ -1013,7 +1011,7 @@ async def callback_handler(event):
         is_god = (bot_db[uid].get('setup_type') == 'god')
         buttons = await get_channel_buttons(client, "add_source", pinned_only=True)
         buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
-        await event.respond("🎯 Agla **PINNED Source Channel** select karein:", buttons=buttons)
+        await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karein / message forward karein):*", buttons=buttons)
 
     elif data == "done_sources":
         user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM'}
@@ -1222,7 +1220,7 @@ async def callback_handler(event):
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
     user_id = event.sender_id
-    text = event.message.text.strip()
+    text = event.message.text.strip() if event.message.text else ""
     if text.startswith('/'): return
     uid = str(user_id)
     state = user_states.get(user_id)
@@ -1335,33 +1333,55 @@ async def handle_text(event):
         await event.respond(f"✅ **Preset '{pname}' Saved!**", buttons=[[Button.inline("📂 View Presets", b"list_presets"), Button.inline("🔙 Back", b"back_to_mode")]])
         return
 
-    # 🔍 SMART HINDI & EMOJI SUPPORTED CHANNEL SEARCH WITH DEBUG
-    if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES', 'SELECT_DEST', 'SELECT_DEST_CUSTOM', 'SELECT_SOURCES_SP', 'SELECT_DEST_SP']:
+    # 🚀 FORWARDED MESSAGE & SMART SEARCH DETECTOR FOR SOURCES
+    if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES', 'SELECT_SOURCES_SP']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
         
+        st = state.get('state')
+        action_prefix = "add_source_sp" if st == 'SELECT_SOURCES_SP' else "add_source"
+        
+        forwarded_chat_id = None
+        forwarded_chat_title = None
+        
+        # Check if message is forwarded from a channel/group
+        if event.message.forward:
+            fwd = event.message.forward
+            if fwd.chat:
+                forwarded_chat_id = fwd.chat.id
+                forwarded_chat_title = getattr(fwd.chat, 'title', None) or getattr(fwd.chat, 'username', 'Source Channel')
+            elif fwd.from_id:
+                pass # User forward not supported, only channels/groups
+
+        if forwarded_chat_id:
+            bot_db[uid]['source_dict'][str(forwarded_chat_id)] = forwarded_chat_title[:15]
+            save_bot_data()
+            
+            src_msg = "✅ **Selected Source Channels:**\n"
+            src_buttons = []
+            for sid, sname in bot_db[uid]['source_dict'].items():
+                src_msg += f"• `{sname}`\n"
+                src_buttons.append([Button.inline(f"❌ Remove {sname}", f"{action_prefix.replace('add', 'rem')}:{sid}".encode())])
+                
+            src_buttons.append([Button.inline("➕ Add More Source", b"more_source_sp" if 'SP' in st else b"more_source")])
+            src_buttons.append([Button.inline("🎯 Done, Select Destination", b"done_sources_sp" if 'SP' in st else b"done_sources")])
+            src_buttons.append([Button.inline("🔙 Back", b"mode_special_start" if 'SP' in st else b"back_to_mode")])
+            
+            await event.reply(f"✅ **Source Channel Auto-Added:** `{forwarded_chat_title}`\n\n{src_msg}", buttons=src_buttons)
+            return
+
+        # Fallback to Text Search if not forwarded
         raw_query = text.lower()
         query = re.sub(r'[^\w\s]', '', raw_query).strip()
         if not query: query = raw_query
 
-        st = state.get('state')
-        if st == 'SELECT_SOURCES_SP': action_prefix = "add_source_sp"
-        elif st == 'SELECT_DEST_SP': action_prefix = "add_dest_sp"
-        elif st == 'SELECT_DEST_CUSTOM': action_prefix = "add_destcust"
-        elif st == 'SELECT_DEST': action_prefix = "add_dest"
-        else: action_prefix = "add_source"
-        
-        require_admin = st in ['SELECT_DEST', 'SELECT_DEST_CUSTOM', 'SELECT_DEST_SP']
-        
         try:
             dialogs = await client.get_dialogs(limit=1000)
             buttons = []
             for d in dialogs:
                 if d.is_channel or d.is_group:
-                    if require_admin and not (getattr(d.entity, 'creator', False) or getattr(d.entity, 'admin_rights', None)): continue
                     name = d.name if d.name else "Unnamed"
                     uname = getattr(d.entity, 'username', '') or ''
-                    
                     clean_name = re.sub(r'[^\w\s]', '', name.lower()).strip()
                     
                     if query in clean_name or query in name.lower() or query in uname.lower() or any(word in clean_name for word in query.split()):
@@ -1373,9 +1393,46 @@ async def handle_text(event):
                 buttons.append([Button.inline("🔙 Back", back_rt)])
                 await event.respond(f"🔍 **Search Results for '{text}':**\nSelect your channel below:", buttons=buttons)
             else:
-                await event.respond(f"❌ Koi channel nahi mila '{text}' ke naam se. Kripya chhota keyword ya @username bhejein.")
+                await event.respond(f"❌ Koi channel nahi mila '{text}' ke naam se. Aap chahe toh us channel ka koi message yahan **forward** bhi kar sakte hain!")
         except Exception as e:
             print(f"❌ Search Error: {e}")
+        return
+
+    # Standard Text Search for Destinations
+    if isinstance(state, dict) and state.get('state') in ['SELECT_DEST', 'SELECT_DEST_CUSTOM', 'SELECT_DEST_SP']:
+        client = user_data.get(user_id, {}).get('client')
+        if not client: return
+        
+        raw_query = text.lower()
+        query = re.sub(r'[^\w\s]', '', raw_query).strip()
+        if not query: query = raw_query
+
+        st = state.get('state')
+        if st == 'SELECT_DEST_SP': action_prefix = "add_dest_sp"
+        elif st == 'SELECT_DEST_CUSTOM': action_prefix = "add_destcust"
+        else: action_prefix = "add_dest"
+        
+        try:
+            dialogs = await client.get_dialogs(limit=1000)
+            buttons = []
+            for d in dialogs:
+                if d.is_channel or d.is_group:
+                    if not (getattr(d.entity, 'creator', False) or getattr(d.entity, 'admin_rights', None)): continue
+                    name = d.name if d.name else "Unnamed"
+                    uname = getattr(d.entity, 'username', '') or ''
+                    clean_name = re.sub(r'[^\w\s]', '', name.lower()).strip()
+                    
+                    if query in clean_name or query in name.lower() or query in uname.lower():
+                        buttons.append([Button.inline(name[:20], data=f"{action_prefix}:{d.id}:{name[:15]}")])
+                        if len(buttons) >= 15: break
+            
+            if buttons:
+                back_rt = b"mode_special_start" if 'SP' in st else b"back_to_mode"
+                buttons.append([Button.inline("🔙 Back", back_rt)])
+                await event.respond(f"🔍 **Search Results for '{text}':**\nSelect your channel below:", buttons=buttons)
+            else:
+                await event.respond(f"❌ Koi destination channel nahi mila '{text}' ke naam se.")
+        except Exception as e: pass
         return
 
     if isinstance(state, dict) and state.get('state') in ['WAITING_HEADER', 'WAITING_FOOTER', 'WAITING_OVER_TEXT']:
@@ -1395,7 +1452,7 @@ async def handle_text(event):
         if is_link: bot_db[uid]['replacer_link'] = text
         else:
             if not text.startswith('@'): text = '@' + text
-            bot_db[uid]['replacer_username'] = text
+            bot_db[uid]['repl_username'] = text
         save_bot_data()
         try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
         except: pass
@@ -1477,5 +1534,6 @@ async def handle_text(event):
 
 print("👑 Master Bot Initialized Successfully with MongoDB Cloud!")
 master_bot.start(bot_token=BOT_TOKEN)
+master_bot.loop.create_action = auto_resume_snipers
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
