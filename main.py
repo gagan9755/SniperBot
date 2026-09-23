@@ -31,8 +31,8 @@ BOT_TOKEN = '8546884710:AAF1lcYQwJiu0q0KWpwvK95MxuncBfXzg34'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
-# 🌐 MONGODB CONFIGURATION
-MONGO_URI = "mongodb+srv://gkgamer12697_db_user:pPNrOmU6ueOs6Mc0@projectmybot.zujl82m.mongodb.net/?appName=ProjectMyBot"
+# 🌐 NEW MONGODB CONFIGURATION (MasterBot)
+MONGO_URI = "mongodb+srv://shivujsisu_db_user:jt7IyjPvNpANLEcm@masterbot.xdbhl8f.mongodb.net/?appName=MasterBot"
 
 try:
     from pymongo import MongoClient
