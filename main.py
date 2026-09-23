@@ -58,15 +58,13 @@ def load_licenses():
         if data:
             data.pop("_id", None)
             return data
-    except Exception as e:
-        print(f"❌ load_licenses Error: {e}")
+    except Exception as e: pass
     return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
 
 def save_licenses(data):
     try:
         licenses_col.update_one({"_id": "config"}, {"$set": data}, upsert=True)
-    except Exception as e:
-        print(f"❌ save_licenses Error: {e}")
+    except Exception as e: pass
 
 license_db = load_licenses()
 
@@ -76,15 +74,13 @@ def load_bot_data():
         if data:
             data.pop("_id", None)
             return data
-    except Exception as e:
-        print(f"❌ load_bot_data Error: {e}")
+    except Exception as e: pass
     return {}
 
 def save_bot_data():
     try:
         bot_data_col.update_one({"_id": "db"}, {"$set": bot_db}, upsert=True)
-    except Exception as e:
-        print(f"❌ save_bot_data Error: {e}")
+    except Exception as e: pass
 
 bot_db = load_bot_data()
 
@@ -115,8 +111,7 @@ def load_user_session(user_id):
         res = sessions_col.find_one({"user_id": str(user_id)})
         if res and "session_string" in res:
             return res["session_string"]
-    except Exception as e:
-        print(f"❌ load_user_session Error: {e}")
+    except Exception as e: pass
     return None
 
 def save_user_session(user_id, string_session):
@@ -126,8 +121,12 @@ def save_user_session(user_id, string_session):
             {"$set": {"session_string": string_session}}, 
             upsert=True
         )
-    except Exception as e:
-        print(f"❌ save_user_session Error: {e}")
+    except Exception as e: pass
+
+def delete_user_session(user_id):
+    try:
+        sessions_col.delete_one({"user_id": str(user_id)})
+    except Exception as e: pass
 
 # --- 🔐 LICENSE LOGIC ---
 def generate_key(days=0, hours=0):
@@ -191,7 +190,8 @@ def get_mode_buttons(user_id):
         [Button.inline("🎯 Specific Source Channel", b"mode_source")],
         [Button.inline("⚡ GOD MODE (Clone + Stickers + Auto-Reply)", b"mode_god_start")],
         [Button.inline("🔐 Special Code Mode (Secret)", b"mode_special_start")],
-        [Button.inline("📂 Saved Presets / Setups", b"list_presets")]
+        [Button.inline("📂 Saved Presets / Setups", b"list_presets")],
+        [Button.inline("🔄 Change Number / Account", b"change_phone_number")]
     ]
     off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
@@ -202,7 +202,7 @@ def get_control_buttons(validity_str):
         [Button.inline("🔴 Pause Bot", b"ctl_pause"), Button.inline("🟢 Resume Bot", b"ctl_run")],
         [Button.inline("💾 Save Current Setup", b"save_current_preset"), Button.inline("📂 Load Preset", b"list_presets")],
         [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
-        [Button.inline("📊 My Stats", b"ctl_stats")]
+        [Button.inline("🔄 Change Number", b"change_phone_number"), Button.inline("📊 My Stats", b"ctl_stats")]
     ]
     off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
@@ -351,7 +351,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 bot_db[uid]['is_running'] = False
                 save_bot_data()
                 if user_id in active_snipers_dict: del active_snipers_dict[user_id]
-                try: await master_bot.send_message(user_id, "⚠️ **Aapki Special Key expire ho chuki hai ya authorized nahi hai!**\nSpecial Code mode stop ho gaya hai.")
+                try: await master_bot.send_message(user_id, "⚠️ **Aapki Special Key expire ho chuki hai ya authorized nahi hai!**")
                 except: pass
                 return
 
@@ -666,6 +666,18 @@ async def callback_handler(event):
 
     try: await event.delete()
     except: pass
+
+    if data == "change_phone_number":
+        if user_id in active_snipers_dict:
+            active_snipers_dict[user_id].is_running = False
+            del active_snipers_dict[user_id]
+        bot_db[uid]['is_running'] = False
+        save_bot_data()
+        delete_user_session(user_id)
+        if user_id in user_data: user_data[user_id].pop('client', None)
+        user_states[user_id] = 'WAITING_PHONE'
+        await event.respond("🔄 **Change Number / Account:**\nPurana session hata diya gaya hai.\n\n📱 Apna naya **Telegram Phone Number** bhejein:")
+        return
 
     if user_id == MASTER_ID:
         if data == "adm_gen_5_30":
@@ -1344,7 +1356,6 @@ async def handle_text(event):
         forwarded_chat_id = None
         forwarded_chat_title = None
         
-        # Robust forward detection (checking both event.message.forward and raw peer)
         fwd = getattr(event.message, 'forward', None)
         if fwd:
             if getattr(fwd, 'chat', None):
@@ -1357,7 +1368,6 @@ async def handle_text(event):
                 elif isinstance(from_id, PeerChat):
                     forwarded_chat_id = -from_id.chat_id
 
-        # If direct fwd chat object is missing, try resolving via Telethon entity if peer is available
         if not forwarded_chat_id and fwd:
             try:
                 if hasattr(fwd, 'saved_from_peer') and fwd.saved_from_peer:
@@ -1376,7 +1386,6 @@ async def handle_text(event):
             except Exception: pass
 
         if forwarded_chat_id:
-            # Normalize channel id for telethon if needed
             if not str(forwarded_chat_id).startswith("-100") and abs(forwarded_chat_id) < 1000000000000:
                 full_dest_id = int(f"-100{abs(forwarded_chat_id)}")
             else:
@@ -1405,7 +1414,6 @@ async def handle_text(event):
             await event.reply(f"✅ **Source Channel Auto-Added:** `{forwarded_chat_title}`\n\n{src_msg}", buttons=src_buttons)
             return
 
-        # Fallback to Text Search if not forwarded
         raw_query = text.lower()
         query = re.sub(r'[^\w\s]', '', raw_query).strip()
         if not query: query = raw_query
@@ -1433,7 +1441,6 @@ async def handle_text(event):
             print(f"❌ Search Error: {e}")
         return
 
-    # Standard Text Search for Destinations
     if isinstance(state, dict) and state.get('state') in ['SELECT_DEST', 'SELECT_DEST_CUSTOM', 'SELECT_DEST_SP']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
