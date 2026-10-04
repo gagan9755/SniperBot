@@ -215,7 +215,7 @@ def get_admin_buttons():
     return [
         [Button.inline("🔑 Gen 1 Key (30D)", b"adm_gen_1_30"), Button.inline("🔑 Gen 5 Keys (30D)", b"adm_gen_5_30")],
         [Button.inline("🔐 Gen Special Key (30D)", b"adm_gen_sp_30"), Button.inline("⚙️ Custom Special Key", b"adm_custom_sp_key")],
-        [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙️️ Custom Key (Days/Hours)", b"adm_custom_key")],
+        [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
         [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🔗 Set Official Channel", b"adm_set_channel")],
         [Button.inline("🚫 Ban User", b"adm_ban_prompt"), Button.inline("✅ Unban User", b"adm_unban_prompt")],
         [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
@@ -379,14 +379,15 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if not text_content and not event.message.media: return
             extracted_items = []
             
-            link_pattern = r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?'
-            found_links = re.findall(link_pattern, text_content)
-            for l in found_links:
-                if l not in extracted_items: extracted_items.append(l)
-
-            for ent, ent_text in event.message.get_entities_text():
-                if isinstance(ent, (MessageEntityCode, MessageEntityPre, types.MessageEntityUrl, types.MessageEntityTextUrl)):
-                    if ent_text not in extracted_items: extracted_items.append(ent_text)
+            if sniper.sniper_mode == "link":
+                link_pattern = r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?'
+                found_links = re.findall(link_pattern, text_content)
+                for l in found_links:
+                    if l not in extracted_items: extracted_items.append(l)
+            else:
+                for ent, ent_text in event.message.get_entities_text():
+                    if isinstance(ent, (MessageEntityCode, MessageEntityPre, types.MessageEntityUrl, types.MessageEntityTextUrl)):
+                        if ent_text not in extracted_items: extracted_items.append(ent_text)
 
             if not extracted_items and text_content:
                 extracted_items = [text_content]
@@ -394,12 +395,17 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if not extracted_items: return
 
             body_texts = []
-            for item in extracted_items:
-                if item.startswith("http://") or item.startswith("https://"):
-                    body_texts.append(item)
-                else:
-                    repeated_lines = [f"`{item}`"] * sniper.lines_count
-                    body_texts.extend(repeated_lines)
+            if sniper.sniper_mode == "rush":
+                num = len(extracted_items)
+                lines = [f"`{extracted_items[0]}`"] * 3 if num == 1 else [f"`{extracted_items[0]}`"] * 2 + [f"`{extracted_items[1]}`"] * 2 if num == 2 else [f"`{c}`" for c in extracted_items]
+                body_texts = lines
+            else:
+                for item in extracted_items:
+                    if item.startswith("http://") or item.startswith("https://"):
+                        body_texts.append(item)
+                    else:
+                        repeated_lines = [f"`{item}`"] * sniper.lines_count
+                        body_texts.extend(repeated_lines)
 
             final_body = "\n".join(body_texts)
             final_text = ""
@@ -729,7 +735,7 @@ async def callback_handler(event):
                 "⚡ **GOD MODE Setup:**\nKya aapko Custom Link ya Username change karna hai?",
                 buttons=[
                     [Button.inline("🔗 Set/Change Link", b"ask_replacer_link"), Button.inline("👤 Set/Change Username", b"ask_replacer_username")],
-                    [Button.inline("🚀 Run GOD MODE", b"run_god_4")],
+                    [Button.inline("🚀 Run GOD MODE", b"run_god_0")],
                     [Button.inline("🏠 Home", b"back_to_mode")]
                 ]
             )
@@ -743,28 +749,47 @@ async def callback_handler(event):
                 ]
             )
         else:
+            # 🛠️ FORWARDING MODES MENU (Rush, Normal, Link)
             await event.respond(
-                "📏 **Line Settings:**\nAap messages ko kitni lines me bhejna chahte hain?",
+                "🛠 **Sniper Forwarding Mode select karein:**",
                 buttons=[
-                    [Button.inline("1 Line", b"lines_1"), Button.inline("2 Lines", b"lines_2")],
-                    [Button.inline("3 Lines", b"lines_3"), Button.inline("4 Lines", b"lines_4")],
+                    [Button.inline("🚀 Start Rush Mode", b"run_rush_0")],
+                    [Button.inline("🟢 Normal Mode", b"ask_lines_normal")],
+                    [Button.inline("🔗 Link Forwarder", b"ask_lines_link")],
                     [Button.inline("🏠 Home", b"back_to_mode")]
                 ]
             )
 
-    elif data.startswith("lines_"):
-        lines_val = int(data.split("_")[1])
-        bot_db[uid]['lines_count'] = lines_val
+    elif data.startswith("ask_lines_"):
+        mode = data.split("_")[2]
+        bot_db[uid]['setup_mode_cache'] = mode
+        save_bot_data()
+        await event.respond(
+            f"📏 **{mode.capitalize()} Mode - Line Settings:**\nAap messages ko kitni lines me bhejna chahte hain?",
+            buttons=[
+                [Button.inline("1 Line", f"format_{mode}_1".encode()), Button.inline("2 Lines", f"format_{mode}_2".encode())],
+                [Button.inline("3 Lines", f"format_{mode}_3".encode()), Button.inline("4 Lines", f"format_{mode}_4".encode())],
+                [Button.inline("🏠 Home", b"back_to_mode")]
+            ]
+        )
+
+    elif data.startswith("format_"):
+        parts = data.split("_")
+        mode_cache = parts[1]
+        lines_cache = int(parts[2])
+        bot_db[uid]['setup_mode_cache'] = mode_cache
+        bot_db[uid]['lines_count'] = lines_cache
         save_bot_data()
 
         await event.respond(
             "⚙️ **Setup Options:**\nKya aapko Header, Footer ya Over text rakhna hai?",
             buttons=[
                 [Button.inline("🔝 Edit/Set Header", b"ask_header"), Button.inline("🔚 Edit/Set Footer", b"ask_footer")],
-                [Button.inline("✏️ Edit Over Text", b"ask_over_text"), Button.inline("🚀 Run Bot Now", b"run_rush_0")],
+                [Button.inline("✏️ Edit Over Text", b"ask_over_text"), Button.inline(f"🚀 Run Bot Now", f"run_{mode_cache}_{lines_cache}".encode())],
                 [Button.inline("🏠 Home", b"back_to_mode")]
             ]
         )
+
     elif data == "ask_header":
         prompt_msg = await event.respond("🔝 **Send Custom Header:**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
         user_states[user_id] = {'state': 'WAITING_HEADER', 'prompt_id': prompt_msg.id}
@@ -880,11 +905,13 @@ async def handle_text(event):
             msg_succ = "✅ **Over Text Saved!**"
         save_bot_data()
         user_states[user_id] = None
+        mode_c = bot_db[uid].get('setup_mode_cache', 'rush')
+        lines_c = bot_db[uid].get('lines_count', 4)
         await event.respond(
             f"{msg_succ}\n\nKya aapko aur kuch set karna hai?",
             buttons=[
                 [Button.inline("🔝 Header", b"ask_header"), Button.inline("🔚 Footer", b"ask_footer")],
-                [Button.inline("✏️ Over Text", b"ask_over_text"), Button.inline("🚀 Run Bot", b"run_rush_0")],
+                [Button.inline("✏️ Over Text", b"ask_over_text"), Button.inline(f"🚀 Run Bot", f"run_{mode_c}_{lines_c}".encode())],
                 [Button.inline("🏠 Home", b"back_to_mode")]
             ]
         )
@@ -898,7 +925,7 @@ async def handle_text(event):
             bot_db[uid]['replacer_username'] = text
         save_bot_data()
         user_states[user_id] = None
-        await event.respond("✅ **Saved Successfully!**", buttons=[[Button.inline("🚀 Run GOD MODE", b"run_god_4"), Button.inline("🏠 Home", b"back_to_mode")]])
+        await event.respond("✅ **Saved Successfully!**", buttons=[[Button.inline("🚀 Run GOD MODE", b"run_god_0"), Button.inline("🏠 Home", b"back_to_mode")]])
         return
 
     if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES']:
