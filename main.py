@@ -39,16 +39,19 @@ MONGO_ERROR_MSG = "Unknown Error"
 
 try:
     from pymongo import MongoClient
-    mongo_client = MongoClient(MONGO_URI)
+    # 🔥 ANTI-FREEZE FIX: Added 3-second timeout so the bot NEVER hangs!
+    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=3000)
+    mongo_client.admin.command('ping') # Fast check
     db = mongo_client["master_sniper_db"]
     sessions_col = db["sessions"]
     print("✅ Connected to MongoDB successfully! (Only Login Sessions will be saved to Cloud)")
     MONGO_ERROR_MSG = "Connected"
 except ImportError as ie:
-    MONGO_ERROR_MSG = f"Library Missing: {ie} (Kripya requirements.txt me 'pymongo' aur 'dnspython' add karein)"
+    MONGO_ERROR_MSG = f"Library Missing: {ie}"
     print(f"❌ {MONGO_ERROR_MSG}")
 except Exception as e:
     MONGO_ERROR_MSG = f"Connection Failed: {e}"
+    sessions_col = None # Prevents bot from freezing if MongoDB is blocked
     print(f"❌ {MONGO_ERROR_MSG}")
 
 master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
@@ -137,6 +140,7 @@ async def ensure_client(user_id):
     if client and client.is_connected(): return client
     session_str = load_user_session(user_id)
     if session_str:
+        # 🔥 SAFE LOADER: Always uses StringSession to avoid SQLite disk errors
         new_c = TelegramClient(StringSession(session_str), API_ID, API_HASH)
         try:
             await new_c.connect()
@@ -441,7 +445,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 lines = [f"`{extracted_items[0]}`"] * 3 if num == 1 else [f"`{extracted_items[0]}`"] * 2 + [f"`{extracted_items[1]}`"] * 2 if num == 2 else [f"`{c}`" for c in extracted_items]
                 messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_god': False})
             else:
-                # 🟢 NORMAL MODE
                 for c in extracted_items:
                     body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
                     final_text = ""
@@ -532,7 +535,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             bot_db[uid]['stats']['forwarded'] += 1
             save_bot_data()
 
-        # 🔥 SPECIAL MODE STOP LOGIC
         if sniper.sniper_mode == "special":
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
@@ -617,8 +619,11 @@ async def auto_resume_snipers():
             client = await ensure_client(user_id)
             if client:
                 dests = list(data.get('dest_dict', {}).keys())
-                sources = [int(s) for s in data.get('source_dict', {}).keys()] if data.get('source_dict') else None
-                await start_sniper_for_user(user_id, client, dests, "User", sources, data.get('sniper_mode', 'rush'), data.get('lines_count', 4))
+                sources = list(data.get('source_dict', {}).keys())
+                sources = [int(s) for s in sources] if sources else None
+                mode = data.get('sniper_mode', 'rush')
+                lines = data.get('lines_count', 4)
+                await start_sniper_for_user(user_id, client, dests, "User", sources, mode, lines)
 
 @master_bot.on(events.NewMessage(pattern='/start'))
 async def start_command(event):
@@ -705,7 +710,7 @@ async def callback_handler(event):
             return
         elif data == "adm_custom_key":
             user_states[user_id] = 'WAITING_CUSTOM_KEY'
-            await event.respond("⚙️️ **Custom Key:**\nFormat: `<count> <time>`", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            await event.respond("⚙️ **Custom Key:**\nFormat: `<count> <time>`", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
         elif data == "adm_users":
             msg = "👥 **Active Users:**\n\n"
@@ -794,7 +799,7 @@ async def callback_handler(event):
             bot_db[uid]['custom_header'] = pdata.get('custom_header')
             bot_db[uid]['custom_footer'] = pdata.get('custom_footer')
             bot_db[uid]['over_timer'] = pdata.get('over_timer', 0)
-            bot_db[uid]['over_text'] = pdata.get('over_text', "❌️❌️ OVER ❌️❌️️")
+            bot_db[uid]['over_text'] = pdata.get('over_text', "❌️❌️ OVER ❌️❌")
             save_bot_data()
 
             client = await ensure_client(user_id)
@@ -1127,7 +1132,7 @@ async def callback_handler(event):
         save_bot_data()
 
         await event.respond(
-            "⏱️️ **Auto-Over Timer Setup:**",
+            "⏱ **Auto-Over Timer Setup:**",
             buttons=[
                 [Button.inline("⏳ 10 Seconds", b"timer_10"), Button.inline("⏳ 30 Seconds", b"timer_30")],
                 [Button.inline("⏱️ 1 Minute", b"timer_60"), Button.inline("⏱️ 5 Minutes", b"timer_300")],
@@ -1143,7 +1148,7 @@ async def callback_handler(event):
 
         header = bot_db[uid].get('custom_header')
         footer = bot_db[uid].get('custom_footer')
-        over_text = bot_db[uid].get('over_text', "❌️️❌️ OVER ❌️❌️")
+        over_text = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
         mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
         lines_cache = bot_db[uid].get('setup_lines_cache', 4)
 
@@ -1525,18 +1530,25 @@ async def handle_text(event):
     if state == 'WAITING_KEY':
         if text in license_db["keys"]:
             k_info = license_db["keys"][text]
-            if k_info["used_by"] and k_info["used_by"] != user_id:
+            if k_info["used_by"] and str(k_info["used_by"]) != str(user_id):
                 await event.reply("❌ Ye key pehle hi use ho chuki hai!")
                 return
             license_db["keys"][text]["used_by"] = user_id
-            license_db["users"][str(user_id)] = {"name": event.sender.first_name, "key": text, "expires": k_info["expires"]}
+            
+            sender = await event.get_sender()
+            first_name = getattr(sender, 'first_name', 'User') if sender else 'User'
+            license_db["users"][str(user_id)] = {"name": first_name, "key": text, "expires": k_info["expires"]}
             save_licenses(license_db)
 
             session_str = load_user_session(user_id)
             client = user_data.get(user_id, {}).get('client')
             if not client:
-                client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
-                await client.connect()
+                # 🔥 SAFE LOADER FIX
+                client = TelegramClient(StringSession(session_str or ""), API_ID, API_HASH)
+                try:
+                    await client.connect()
+                except Exception as e:
+                    pass
 
             if await client.is_user_authorized():
                 if user_id not in user_data: user_data[user_id] = {}
@@ -1554,7 +1566,7 @@ async def handle_text(event):
         user_states[user_id] = {'state': 'WAITING_OTP', 'phone': text}
         await event.reply("🔄 OTP bhej rahe hain...")
         try:
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
+            client = TelegramClient(StringSession(""), API_ID, API_HASH)
             await client.connect()
             sent = await client.send_code_request(text)
             if user_id not in user_data: user_data[user_id] = {}
