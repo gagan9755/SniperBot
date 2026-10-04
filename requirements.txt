@@ -1,3 +1,4 @@
 telethon
-pymongo[srv]
+pymongo
+dnspython
 flask
