@@ -36,19 +36,22 @@ master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
 # 🌐 MONGODB CONFIGURATION (Aapka Apna Cloud Database)
 MONGO_URI = "mongodb+srv://gkgamer12697_db_user:4mUkf5fi0T0MwcrR@cluster0.4su8lly.mongodb.net/?appName=Cluster0"
 
+# GLOBAL VARIABLES
+licenses_col = None
+bot_data_col = None
+sessions_col = None
+
 try:
     from pymongo import MongoClient
-    # serverSelectionTimeoutMS lagaya hai taaki connection fast verify ho
     mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, tlsAllowInvalidCertificates=True)
     db = mongo_client["master_sniper_db"]
     licenses_col = db["licenses"]
     bot_data_col = db["bot_data"]
     sessions_col = db["sessions"]
-    # Ping to check connection
     mongo_client.admin.command('ping')
     print("✅ Connected to MongoDB successfully!")
 except Exception as e:
-    err_msg = f"❌ MongoDB Connection Error: {e}"
+    err_msg = f"❌ MongoDB Connection Error: {e}\n⚠️ Kripya 'pip install pymongo[srv]' run karein aur MongoDB Atlas me Network Access 0.0.0.0/0 karein!"
     print(err_msg)
 
 user_states = {}
@@ -57,6 +60,7 @@ active_snipers_dict = {}
 
 # --- 🔐 DATABASES (Cloud-Backed with Admin Alert) ---
 def load_licenses():
+    if licenses_col is None: return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}}
     try:
         data = licenses_col.find_one({"_id": "config"})
         if data:
@@ -66,6 +70,7 @@ def load_licenses():
     return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
 
 def save_licenses(data):
+    if licenses_col is None: return
     try:
         licenses_col.update_one({"_id": "config"}, {"$set": data}, upsert=True)
     except Exception as e: pass
@@ -73,6 +78,7 @@ def save_licenses(data):
 license_db = load_licenses()
 
 def load_bot_data():
+    if bot_data_col is None: return {}
     try:
         data = bot_data_col.find_one({"_id": "db"})
         if data:
@@ -82,6 +88,7 @@ def load_bot_data():
     return {}
 
 def save_bot_data():
+    if bot_data_col is None: return
     try:
         bot_data_col.update_one({"_id": "db"}, {"$set": bot_db}, upsert=True)
     except Exception as e: pass
@@ -114,6 +121,7 @@ def init_user_db(user_id):
 
 # --- ☁️ STRING SESSION HELPERS (With Error Alerts) ---
 def load_user_session(user_id):
+    if sessions_col is None: return None
     try:
         res = sessions_col.find_one({"user_id": str(user_id)})
         if res and "session_string" in res:
@@ -126,6 +134,12 @@ def load_user_session(user_id):
     return None
 
 def save_user_session(user_id, string_session):
+    if sessions_col is None:
+        err = f"⚠️ **DATABASE ALERT:**\nMongoDB connect nahi hai. Session save nahi hua! Check MongoDB Settings."
+        print(err)
+        if master_bot and master_bot.loop and master_bot.loop.is_running():
+            master_bot.loop.create_task(master_bot.send_message(MASTER_ID, err))
+        return
     try:
         sessions_col.update_one(
             {"user_id": str(user_id)}, 
@@ -139,6 +153,7 @@ def save_user_session(user_id, string_session):
             master_bot.loop.create_task(master_bot.send_message(MASTER_ID, err))
 
 def delete_user_session(user_id):
+    if sessions_col is None: return
     try:
         sessions_col.delete_one({"user_id": str(user_id)})
     except Exception as e: pass
@@ -215,7 +230,7 @@ def get_mode_buttons(user_id):
 def get_control_buttons(validity_str):
     btns = [
         [Button.inline("🔴 Pause Bot", b"ctl_pause"), Button.inline("🟢 Resume Bot", b"ctl_run")],
-        [Button.inline("⚙️ Manage Sources/Dest", b"manage_channels"), Button.inline("💾 Save Setup", b"save_current_preset")],
+        [Button.inline("⚙️️ Manage Sources/Dest", b"manage_channels"), Button.inline("💾 Save Setup", b"save_current_preset")],
         [Button.inline("📂 Load Preset", b"list_presets"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
         [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Change Number", b"change_phone_number")]
     ]
@@ -227,7 +242,7 @@ def get_admin_buttons():
     return [
         [Button.inline("🔑 Gen 1 Key (30D)", b"adm_gen_1_30"), Button.inline("🔑 Gen 5 Keys (30D)", b"adm_gen_5_30")],
         [Button.inline("🔐 Gen Special Key (30D)", b"adm_gen_sp_30"), Button.inline("⚙️ Custom Special Key", b"adm_custom_sp_key")],
-        [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
+        [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙ Custom Key (Days/Hours)", b"adm_custom_key")],
         [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🔗 Set Official Channel", b"adm_set_channel")],
         [Button.inline("🚫 Ban User", b"adm_ban_prompt"), Button.inline("✅ Unban User", b"adm_unban_prompt")],
         [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
@@ -279,6 +294,7 @@ class UserSniper:
         self.special_triggered = False 
         self.msg_map = {} 
         self.msg_map_keys = deque(maxlen=1000)
+        self.handlers = [] # Track handlers to prevent double-messages
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -290,8 +306,14 @@ class UserSniper:
             await asyncio.sleep(30)
 
 async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
+    # DUP-HANDLER FIX: Remove old sniper handlers before starting new one
     if user_id in active_snipers_dict:
-        active_snipers_dict[user_id].is_running = False
+        old_sniper = active_snipers_dict[user_id]
+        old_sniper.is_running = False
+        for h in getattr(old_sniper, 'handlers', []):
+            try: client.remove_event_handler(h)
+            except: pass
+        del active_snipers_dict[user_id]
 
     init_user_db(user_id)
     uid = str(user_id)
@@ -317,25 +339,16 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
     active_snipers_dict[user_id] = sniper
     asyncio.create_task(sniper.update_pinned_loop())
 
-    def remove_all_handlers():
-        try: client.remove_event_handler(handler)
-        except: pass
-        try: client.remove_event_handler(edit_handler)
-        except: pass
-        try: client.remove_event_handler(delete_handler)
-        except: pass
-
-    @client.on(events.NewMessage())
-    async def handler(event):
-        if not sniper.is_running:
-            remove_all_handlers()
-            return
+    async def new_msg_handler(event):
+        if not sniper.is_running: return
 
         if not check_subscription(user_id):
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
             save_bot_data()
-            remove_all_handlers()
+            for h in sniper.handlers:
+                try: client.remove_event_handler(h)
+                except: pass
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
             try: await master_bot.send_message(user_id, "⚠️ **Aapki License Key expire ho chuki hai!**")
             except: pass
@@ -470,12 +483,14 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
             save_bot_data()
+            for h in sniper.handlers:
+                try: client.remove_event_handler(h)
+                except: pass
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
             try: await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**")
             except: pass
 
     # ⚡ GOD MODE LIVE EDIT & DELETE HANDLERS
-    @client.on(events.MessageEdited())
     async def edit_handler(event):
         if not sniper.is_running: return
         if sniper.is_paused or sniper.sniper_mode != "god": return
@@ -512,7 +527,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media)
         except Exception as e: pass
 
-    @client.on(events.MessageDeleted())
     async def delete_handler(event):
         if not sniper.is_running: return
         if sniper.is_paused or sniper.sniper_mode != "god": return
@@ -523,6 +537,12 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if target:
                         try: await client.delete_messages(target, dest_msg_id)
                         except: pass
+
+    client.add_event_handler(new_msg_handler, events.NewMessage())
+    client.add_event_handler(edit_handler, events.MessageEdited())
+    client.add_event_handler(delete_handler, events.MessageDeleted())
+    
+    sniper.handlers.extend([new_msg_handler, edit_handler, delete_handler])
 
     try:
         time_left = get_time_left(user_id)
@@ -597,7 +617,11 @@ async def callback_handler(event):
 
     if data == "change_phone_number":
         if user_id in active_snipers_dict:
-            active_snipers_dict[user_id].is_running = False
+            old_sniper = active_snipers_dict[user_id]
+            old_sniper.is_running = False
+            for h in getattr(old_sniper, 'handlers', []):
+                try: user_data.get(user_id, {}).get('client').remove_event_handler(h)
+                except: pass
             del active_snipers_dict[user_id]
         bot_db[uid]['is_running'] = False
         save_bot_data()
@@ -846,7 +870,11 @@ async def callback_handler(event):
     
     elif data == "ctl_restart":
         if user_id in active_snipers_dict:
-            active_snipers_dict[user_id].is_running = False
+            old_sniper = active_snipers_dict[user_id]
+            old_sniper.is_running = False
+            for h in getattr(old_sniper, 'handlers', []):
+                try: user_data.get(user_id, {}).get('client').remove_event_handler(h)
+                except: pass
             del active_snipers_dict[user_id]
         bot_db[uid]['is_running'] = False
         save_bot_data()
@@ -1001,7 +1029,13 @@ async def handle_text(event):
             if text in license_db.get("users", {}):
                 del license_db["users"][text]
                 save_licenses(license_db)
-                if int(text) in active_snipers_dict: active_snipers_dict[int(text)].is_running = False
+                if int(text) in active_snipers_dict:
+                    old_sniper = active_snipers_dict[int(text)]
+                    old_sniper.is_running = False
+                    for h in getattr(old_sniper, 'handlers', []):
+                        try: user_data.get(int(text), {}).get('client').remove_event_handler(h)
+                        except: pass
+                    del active_snipers_dict[int(text)]
                 user_states[user_id] = None
                 await event.reply(f"✅ User `{text}` BAN!", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
             else: await event.reply("❌ User not found.", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
@@ -1163,7 +1197,7 @@ async def handle_text(event):
             session_string = client.session.save()
             save_user_session(user_id, session_string)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ **Login Successful! Session Cloud par save ho gaya hai! ☁️**", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ **Login Successful! Session Cloud par save ho gaya hai! ☁️️**", buttons=get_mode_buttons(user_id))
         except SessionPasswordNeededError:
             user_states[user_id] = {'state': 'WAITING_PASSWORD'}
             await event.reply("🔒 2-Step Verification Password bhejein:")
@@ -1178,7 +1212,7 @@ async def handle_text(event):
             session_string = client.session.save()
             save_user_session(user_id, session_string)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️️**", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️**", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
