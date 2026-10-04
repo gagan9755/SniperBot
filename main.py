@@ -24,7 +24,7 @@ def run_server():
     app.run(host='0.0.0.0', port=8080)
 Thread(target=run_server).start()
 
-# --- ⚙️ MASTER CONFIGURATION ---
+# --- ⚙️️ MASTER CONFIGURATION ---
 API_ID = 21601452
 API_HASH = 'cc8257993f2553fec9f43bcd6b8f79c4'
 BOT_TOKEN = '8546884710:AAF1lcYQwJiu0q0KWpwvK95MxuncBfXzg34'
@@ -39,8 +39,8 @@ MONGO_ERROR_MSG = "Unknown Error"
 
 try:
     from pymongo import MongoClient
-    # 🔥 ANTI-FREEZE FIX: Added 3-second timeout so the bot NEVER hangs!
-    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=3000)
+    # 🔥 SSL & ANTI-FREEZE FIX: Added tlsAllowInvalidCertificates=True back!
+    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=3000, tlsAllowInvalidCertificates=True)
     mongo_client.admin.command('ping') # Fast check
     db = mongo_client["master_sniper_db"]
     sessions_col = db["sessions"]
@@ -140,7 +140,6 @@ async def ensure_client(user_id):
     if client and client.is_connected(): return client
     session_str = load_user_session(user_id)
     if session_str:
-        # 🔥 SAFE LOADER: Always uses StringSession to avoid SQLite disk errors
         new_c = TelegramClient(StringSession(session_str), API_ID, API_HASH)
         try:
             await new_c.connect()
@@ -646,7 +645,7 @@ async def start_command(event):
             if user_id in active_snipers_dict:
                 sniper = active_snipers_dict[user_id]
                 status_txt = "🟢 **BOT IS ON**" if not sniper.is_paused else "🟡 **BOT IS PAUSED**"
-                await event.reply(f"{status_txt}\n\n⏳ **Validity:** {validity_str}\nApna bot control karne ke liye niche buttons use karein:", buttons=get_control_buttons(validity_str))
+                await event.reply(f"{status_txt}\n\n⏳ **Validity:** {validity_str}\nApna bot control karne ke niche buttons use karein:", buttons=get_control_buttons(validity_str))
                 return
 
             client = await ensure_client(user_id)
@@ -1543,7 +1542,6 @@ async def handle_text(event):
             session_str = load_user_session(user_id)
             client = user_data.get(user_id, {}).get('client')
             if not client:
-                # 🔥 SAFE LOADER FIX
                 client = TelegramClient(StringSession(session_str or ""), API_ID, API_HASH)
                 try:
                     await client.connect()
