@@ -33,8 +33,8 @@ MASTER_ID = 8845438009  # Your Admin ID
 
 master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
 
-# 🌐 MONGODB CONFIGURATION (Aapka Apna Cloud Database)
-MONGO_URI = "mongodb+srv://gkgamer12697_db_user:4mUkf5fi0T0MwcrR@cluster0.4su8lly.mongodb.net/?appName=Cluster0"
+# 🌐 MONGODB CONFIGURATION (Long URL for Cloud Servers)
+MONGO_URI = "mongodb://gkgamer12697_db_user:4mUkf5fi0T0MwcrR@ac-dnrbgvj-shard-00-00.4su8lly.mongodb.net:27017,ac-dnrbgvj-shard-00-01.4su8lly.mongodb.net:27017,ac-dnrbgvj-shard-00-02.4su8lly.mongodb.net:27017/?ssl=true&replicaSet=atlas-10pwl1-shard-0&authSource=admin&appName=Cluster0"
 
 # GLOBAL VARIABLES
 licenses_col = None
