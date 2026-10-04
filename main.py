@@ -440,12 +440,17 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 return sent_msg.id if sent_msg else None
             except Exception as e: return None
 
-        sent_msgs = {}
+        sent_msgs_this_event = {}
         for d_id, target in sniper.destinations.items():
             res_id = await send_to_destination(target, messages_to_send[0])
-            if res_id: sent_msgs[d_id] = res_id
+            if res_id: sent_msgs_this_event[d_id] = res_id
 
-        if sent_msgs:
+        if sent_msgs_this_event:
+            if len(sniper.msg_map_keys) >= 1000:
+                old_id = sniper.msg_map_keys.popleft()
+                sniper.msg_map.pop(old_id, None)
+            sniper.msg_map_keys.append(event.id)
+            sniper.msg_map[event.id] = sent_msgs_this_event
             bot_db[uid]['stats']['forwarded'] += 1
             save_bot_data()
 
@@ -456,6 +461,56 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
             try: await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**")
             except: pass
+
+    # ⚡ FULL GOD MODE LIVE EDIT & DELETE HANDLERS RESTORED
+    @client.on(events.MessageEdited())
+    async def edit_handler(event):
+        if not sniper.is_running: return
+        if sniper.is_paused or sniper.sniper_mode != "god": return
+        if sniper.source_chat_ids and event.chat_id not in sniper.source_chat_ids: return
+        elif not sniper.source_chat_ids and event.chat_id not in sniper.pinned_chats: return
+        if event.id not in sniper.msg_map: return
+        
+        text_content = event.message.message or ""
+        replacer_link = bot_db[uid].get('replacer_link')
+        replacer_uname = bot_db[uid].get('replacer_username')
+        
+        try:
+            if not replacer_link and not replacer_uname:
+                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
+                    target = sniper.destinations.get(int(d_id))
+                    if target:
+                        edit_kwargs = {'text': text_content, 'file': event.message.media}
+                        if event.message.entities: edit_kwargs['formatting_entities'] = event.message.entities
+                        await client.edit_message(target, dest_msg_id, **edit_kwargs)
+            else:
+                msg_html = text_content
+                try: msg_html = html.unparse(text_content, event.message.entities)
+                except: pass
+                
+                if replacer_link: 
+                    msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+                    msg_html = re.sub(r'(https?://)?t\.me/joinchat/[a-zA-Z0-9_-]+', replacer_link, msg_html)
+                    msg_html = re.sub(r'https?://[^\s]+', replacer_link, msg_html)
+                if replacer_uname: 
+                    msg_html = safe_replace_username(msg_html, replacer_uname)
+                
+                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
+                    target = sniper.destinations.get(int(d_id))
+                    if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media)
+        except Exception as e: pass
+
+    @client.on(events.MessageDeleted())
+    async def delete_handler(event):
+        if not sniper.is_running: return
+        if sniper.is_paused or sniper.sniper_mode != "god": return
+        for deleted_id in event.deleted_ids:
+            if deleted_id in sniper.msg_map:
+                for d_id, dest_msg_id in sniper.msg_map[deleted_id].items():
+                    target = sniper.destinations.get(int(d_id))
+                    if target:
+                        try: await client.delete_messages(target, dest_msg_id)
+                        except: pass
 
     try:
         time_left = get_time_left(user_id)
@@ -538,6 +593,63 @@ async def callback_handler(event):
         if user_id in user_data: user_data[user_id].pop('client', None)
         user_states[user_id] = 'WAITING_PHONE'
         await event.respond("🔄 **Change Number / Account:**\nPurana session hata diya gaya hai.\n\n📱 Apna naya **Telegram Phone Number** bhejein:", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]] )
+        return
+
+    # 📂 PRESETS HANDLING
+    if data == "list_presets":
+        presets = bot_db[uid].get('presets', {})
+        if not presets:
+            await event.respond("📂 **Aapke paas koi saved preset nahi hai!**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
+            return
+        btns = []
+        for pname in presets.keys():
+            btns.append([Button.inline(f"📂 Load: {pname}", f"load_preset:{pname}".encode()), Button.inline(f"❌ Delete", f"del_preset:{pname}".encode())])
+        btns.append([Button.inline("🏠 Home", b"back_to_mode")])
+        await event.respond("📂 **Aapke Saved Presets:**", buttons=btns)
+        return
+
+    if data == "save_current_preset":
+        prompt_msg = await event.respond("💾 **Save Preset:**\n\nApne is setup ke liye ek pyara sa **Name** type karke bhejein:", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
+        user_states[user_id] = {'state': 'WAITING_PRESET_NAME', 'prompt_id': prompt_msg.id}
+        return
+
+    if data.startswith("load_preset:"):
+        pname = data.split(":")[1]
+        presets = bot_db[uid].get('presets', {})
+        if pname in presets:
+            pdata = presets[pname]
+            bot_db[uid]['dest_dict'] = dict(pdata.get('dest_dict', {}))
+            bot_db[uid]['source_dict'] = dict(pdata.get('source_dict', {}))
+            bot_db[uid]['sniper_mode'] = pdata.get('sniper_mode', 'rush')
+            bot_db[uid]['lines_count'] = pdata.get('lines_count', 4)
+            save_bot_data()
+
+            client = user_data.get(user_id, {}).get('client')
+            dest_list = list(bot_db[uid]['dest_dict'].keys())
+            src_keys = list(bot_db[uid]['source_dict'].keys())
+            source_list = [int(s) for s in src_keys] if src_keys else None
+            mode = bot_db[uid]['sniper_mode']
+            lines = bot_db[uid]['lines_count']
+
+            await event.respond(f"✅ **Preset '{pname}' Loaded!**\n🚀 Bot Start ho raha hai...")
+            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines)
+        return
+
+    if data.startswith("del_preset:"):
+        pname = data.split(":")[1]
+        presets = bot_db[uid].get('presets', {})
+        if pname in presets:
+            del presets[pname]
+            save_bot_data()
+            await event.answer(f"Preset '{pname}' deleted!", alert=True)
+            if not presets:
+                await event.respond("📂 **Aapke paas koi saved preset nahi hai!**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
+            else:
+                btns = []
+                for pn in presets.keys():
+                    btns.append([Button.inline(f"📂 Load: {pn}", f"load_preset:{pn}".encode()), Button.inline(f"❌ Delete", f"del_preset:{pn}".encode())])
+                btns.append([Button.inline("🏠 Home", b"back_to_mode")])
+                await event.respond("📂 **Aapke Saved Presets:**", buttons=btns)
         return
 
     # 🛠️ LIVE CHANNEL MANAGEMENT WITH REMOVE BUTTONS
@@ -911,7 +1023,7 @@ async def handle_text(event):
                 generated = [f"`{generate_key(days=days, hours=hours)}`" for _ in range(count)]
                 user_states[user_id] = None
                 await event.reply(f"✅ **{count} New Keys Generated:**\n\n" + "\n".join(generated), buttons=[[Button.inline("🔙 Back", b"adm_back")]])
-            except: await event.reply("⚠️ Format Error!", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            except: await event.reply("⚠️️ Format Error!", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
     if isinstance(state, dict) and state.get('state') == 'WAITING_SPECIAL_KEY':
