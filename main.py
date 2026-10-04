@@ -215,7 +215,7 @@ def get_admin_buttons():
     return [
         [Button.inline("🔑 Gen 1 Key (30D)", b"adm_gen_1_30"), Button.inline("🔑 Gen 5 Keys (30D)", b"adm_gen_5_30")],
         [Button.inline("🔐 Gen Special Key (30D)", b"adm_gen_sp_30"), Button.inline("⚙️ Custom Special Key", b"adm_custom_sp_key")],
-        [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙️️ Custom Key (Days/Hours)", b"adm_custom_key")],
+        [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
         [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🔗 Set Official Channel", b"adm_set_channel")],
         [Button.inline("🚫 Ban User", b"adm_ban_prompt"), Button.inline("✅ Unban User", b"adm_unban_prompt")],
         [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
@@ -354,7 +354,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if not extracted_items: return
             sniper.special_triggered = True
             c = extracted_items[0]
-            # Special mode uses fast rush code forwarding without lines restriction
             messages_to_send.append({'text': f"`{c}`", 'media': None, 'is_special': True})
 
         elif sniper.sniper_mode == "god":
@@ -541,72 +540,46 @@ async def callback_handler(event):
         await event.respond("🔄 **Change Number / Account:**\nPurana session hata diya gaya hai.\n\n📱 Apna naya **Telegram Phone Number** bhejein:", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]] )
         return
 
-    # 📂 PRESETS HANDLING FIXED
-    if data == "list_presets":
-        presets = bot_db[uid].get('presets', {})
-        if not presets:
-            await event.respond("📂 **Aapke paas koi saved preset nahi hai!**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
-            return
-        btns = []
-        for pname in presets.keys():
-            btns.append([Button.inline(f"📂 Load: {pname}", f"load_preset:{pname}".encode()), Button.inline(f"❌ Delete", f"del_preset:{pname}".encode())])
-        btns.append([Button.inline("🏠 Home", b"back_to_mode")])
-        await event.respond("📂 **Aapke Saved Presets:**", buttons=btns)
-        return
-
-    if data == "save_current_preset":
-        prompt_msg = await event.respond("💾 **Save Preset:**\n\nApne is setup ke liye ek pyara sa **Name** type karke bhejein:", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
-        user_states[user_id] = {'state': 'WAITING_PRESET_NAME', 'prompt_id': prompt_msg.id}
-        return
-
-    if data.startswith("load_preset:"):
-        pname = data.split(":")[1]
-        presets = bot_db[uid].get('presets', {})
-        if pname in presets:
-            pdata = presets[pname]
-            bot_db[uid]['dest_dict'] = dict(pdata.get('dest_dict', {}))
-            bot_db[uid]['source_dict'] = dict(pdata.get('source_dict', {}))
-            bot_db[uid]['sniper_mode'] = pdata.get('sniper_mode', 'rush')
-            bot_db[uid]['lines_count'] = pdata.get('lines_count', 4)
-            save_bot_data()
-
-            client = user_data.get(user_id, {}).get('client')
-            dest_list = list(bot_db[uid]['dest_dict'].keys())
-            src_keys = list(bot_db[uid]['source_dict'].keys())
-            source_list = [int(s) for s in src_keys] if src_keys else None
-            mode = bot_db[uid]['sniper_mode']
-            lines = bot_db[uid]['lines_count']
-
-            await event.respond(f"✅ **Preset '{pname}' Loaded!**\n🚀 Bot Start ho raha hai...")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines)
-        return
-
-    if data.startswith("del_preset:"):
-        pname = data.split(":")[1]
-        presets = bot_db[uid].get('presets', {})
-        if pname in presets:
-            del presets[pname]
-            save_bot_data()
-            await event.answer(f"Preset '{pname}' deleted!", alert=True)
-            if not presets:
-                await event.respond("📂 **Aapke paas koi saved preset nahi hai!**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
-            else:
-                btns = []
-                for pn in presets.keys():
-                    btns.append([Button.inline(f"📂 Load: {pn}", f"load_preset:{pn}".encode()), Button.inline(f"❌ Delete", f"del_preset:{pn}".encode())])
-                btns.append([Button.inline("🏠 Home", b"back_to_mode")])
-                await event.respond("📂 **Aapke Saved Presets:**", buttons=btns)
-        return
-
-    # LIVE CHANNEL MANAGEMENT OPTIONS
+    # 🛠️ LIVE CHANNEL MANAGEMENT WITH REMOVE BUTTONS
     if data == "manage_channels":
-        await event.respond(
-            "⚙️ **Manage Sources & Destinations:**\nAap kya change karna chahte hain?",
-            buttons=[
-                [Button.inline("📥 Add/Remove Source", b"manage_add_source"), Button.inline("🚀 Add/Remove Destination", b"manage_add_dest")],
-                [Button.inline("🏠 Home", b"back_to_mode")]
-            ]
-        )
+        src_dict = bot_db[uid].get('source_dict', {})
+        dest_dict = bot_db[uid].get('dest_dict', {})
+        
+        msg = "⚙️ **Manage Sources & Destinations:**\n\n📥 **Current Sources:**\n"
+        btns = []
+        for sid, sname in src_dict.items():
+            msg += f"• `{sname}`\n"
+            btns.append([Button.inline(f"❌ Remove Source: {sname}", f"rem_src:{sid}".encode())])
+            
+        if not src_dict: msg += "*(Koi source nahi hai - Auto Pinned Mode)*\n"
+        
+        msg += "\n🚀 **Current Destinations:**\n"
+        for did, dname in dest_dict.items():
+            msg += f"• `{dname}`\n"
+            btns.append([Button.inline(f"❌ Remove Dest: {dname}", f"rem_dest:{did}".encode())])
+            
+        if not dest_dict: msg += "*(Koi destination nahi hai)*\n"
+        
+        btns.append([Button.inline("📥 Add Source", b"manage_add_source"), Button.inline("🚀 Add Destination", b"manage_add_dest")])
+        btns.append([Button.inline("🏠 Home", b"back_to_mode")])
+        
+        await event.respond(msg, buttons=btns)
+        return
+
+    if data.startswith("rem_src:"):
+        sid = data.split(":")[1]
+        bot_db[uid]['source_dict'].pop(sid, None)
+        save_bot_data()
+        await event.answer("Source removed!", alert=True)
+        await callback_handler(events.CallbackQuery.Event(data=b"manage_channels", sender_id=user_id))
+        return
+
+    if data.startswith("rem_dest:"):
+        did = data.split(":")[1]
+        bot_db[uid]['dest_dict'].pop(did, None)
+        save_bot_data()
+        await event.answer("Destination removed!", alert=True)
+        await callback_handler(events.CallbackQuery.Event(data=b"manage_channels", sender_id=user_id))
         return
 
     if data == "manage_add_source":
@@ -747,7 +720,6 @@ async def callback_handler(event):
         save_bot_data()
         await event.respond("🟢 **BOT IS ON**", buttons=get_control_buttons(format_time_left(get_time_left(user_id))))
     
-    # 🔄 RESTART SETUP HANDLING FIXED
     elif data == "ctl_restart":
         if user_id in active_snipers_dict:
             active_snipers_dict[user_id].is_running = False
@@ -817,7 +789,6 @@ async def callback_handler(event):
                 ]
             )
         else:
-            # 🛠️ FORWARDING MODES MENU (Rush, Normal, Link)
             await event.respond(
                 "🛠 **Sniper Forwarding Mode select karein:**",
                 buttons=[
@@ -865,7 +836,7 @@ async def callback_handler(event):
         prompt_msg = await event.respond("🔚 **Send Custom Footer:**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
         user_states[user_id] = {'state': 'WAITING_FOOTER', 'prompt_id': prompt_msg.id}
     elif data == "ask_over_text":
-        prompt_msg = await event.respond("✏️️ **Send Custom Over Text:**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
+        prompt_msg = await event.respond("✏️ **Send Custom Over Text:**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
         user_states[user_id] = {'state': 'WAITING_OVER_TEXT', 'prompt_id': prompt_msg.id}
     elif data == "ask_replacer_link":
         prompt_msg = await event.respond("🔗 **Send Custom Link:**", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]])
@@ -1083,7 +1054,7 @@ async def handle_text(event):
             session_string = client.session.save()
             save_user_session(user_id, session_string)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️️**", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️**", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
