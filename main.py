@@ -31,27 +31,31 @@ BOT_TOKEN = '8546884710:AAF1lcYQwJiu0q0KWpwvK95MxuncBfXzg34'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
-# 🌐 MONGODB CONFIGURATION (MasterBot)
-MONGO_URI = "mongodb+srv://shivujsisu_db_user:jt7IyjPvNpANLEcm@masterbot.xdbhl8f.mongodb.net/?appName=MasterBot"
+master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
+
+# 🌐 MONGODB CONFIGURATION (Aapka Apna Cloud Database)
+MONGO_URI = "mongodb+srv://gkgamer12697_db_user:4mUkf5fi0T0MwcrR@cluster0.4su8lly.mongodb.net/?appName=Cluster0"
 
 try:
     from pymongo import MongoClient
-    mongo_client = MongoClient(MONGO_URI)
+    # serverSelectionTimeoutMS lagaya hai taaki connection fast verify ho
+    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, tlsAllowInvalidCertificates=True)
     db = mongo_client["master_sniper_db"]
     licenses_col = db["licenses"]
     bot_data_col = db["bot_data"]
     sessions_col = db["sessions"]
+    # Ping to check connection
+    mongo_client.admin.command('ping')
     print("✅ Connected to MongoDB successfully!")
 except Exception as e:
-    print(f"❌ MongoDB Connection Error: {e}")
-
-master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
+    err_msg = f"❌ MongoDB Connection Error: {e}"
+    print(err_msg)
 
 user_states = {}
 user_data = {}  
 active_snipers_dict = {}
 
-# --- 🔐 DATABASES (Cloud-Backed) ---
+# --- 🔐 DATABASES (Cloud-Backed with Admin Alert) ---
 def load_licenses():
     try:
         data = licenses_col.find_one({"_id": "config"})
@@ -108,13 +112,17 @@ def init_user_db(user_id):
         }
         save_bot_data()
 
-# --- ☁️ STRING SESSION HELPERS ---
+# --- ☁️ STRING SESSION HELPERS (With Error Alerts) ---
 def load_user_session(user_id):
     try:
         res = sessions_col.find_one({"user_id": str(user_id)})
         if res and "session_string" in res:
             return res["session_string"]
-    except Exception as e: pass
+    except Exception as e: 
+        err = f"⚠️ **DATABASE ALERT:**\nMongoDB se session load nahi ho pa raha!\nUser: `{user_id}`\nError: `{e}`"
+        print(err)
+        if master_bot and master_bot.loop and master_bot.loop.is_running():
+            master_bot.loop.create_task(master_bot.send_message(MASTER_ID, err))
     return None
 
 def save_user_session(user_id, string_session):
@@ -124,7 +132,11 @@ def save_user_session(user_id, string_session):
             {"$set": {"session_string": string_session}}, 
             upsert=True
         )
-    except Exception as e: pass
+    except Exception as e: 
+        err = f"⚠️ **DATABASE ALERT:**\nMongoDB me session save nahi ho pa raha! (Server restart par login ud jayega)\nUser: `{user_id}`\nError: `{e}`"
+        print(err)
+        if master_bot and master_bot.loop and master_bot.loop.is_running():
+            master_bot.loop.create_task(master_bot.send_message(MASTER_ID, err))
 
 def delete_user_session(user_id):
     try:
@@ -462,7 +474,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             try: await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**")
             except: pass
 
-    # ⚡ FULL GOD MODE LIVE EDIT & DELETE HANDLERS RESTORED
+    # ⚡ GOD MODE LIVE EDIT & DELETE HANDLERS
     @client.on(events.MessageEdited())
     async def edit_handler(event):
         if not sniper.is_running: return
@@ -1023,7 +1035,7 @@ async def handle_text(event):
                 generated = [f"`{generate_key(days=days, hours=hours)}`" for _ in range(count)]
                 user_states[user_id] = None
                 await event.reply(f"✅ **{count} New Keys Generated:**\n\n" + "\n".join(generated), buttons=[[Button.inline("🔙 Back", b"adm_back")]])
-            except: await event.reply("⚠️️ Format Error!", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            except: await event.reply("⚠️ Format Error!", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
 
     if isinstance(state, dict) and state.get('state') == 'WAITING_SPECIAL_KEY':
@@ -1166,7 +1178,7 @@ async def handle_text(event):
             session_string = client.session.save()
             save_user_session(user_id, session_string)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️**", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️️**", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
