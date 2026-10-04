@@ -33,13 +33,14 @@ MASTER_ID = 8845438009  # Your Admin ID
 
 master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
 
-# 🌐 MONGODB CONFIGURATION (Long URL for Cloud Servers)
+# 🌐 MONGODB CONFIGURATION (Long URL)
 MONGO_URI = "mongodb://gkgamer12697_db_user:4mUkf5fi0T0MwcrR@ac-dnrbgvj-shard-00-00.4su8lly.mongodb.net:27017,ac-dnrbgvj-shard-00-01.4su8lly.mongodb.net:27017,ac-dnrbgvj-shard-00-02.4su8lly.mongodb.net:27017/?ssl=true&replicaSet=atlas-10pwl1-shard-0&authSource=admin&appName=Cluster0"
 
 # GLOBAL VARIABLES
 licenses_col = None
 bot_data_col = None
 sessions_col = None
+MONGO_ERROR_MSG = "Unknown Error"
 
 try:
     from pymongo import MongoClient
@@ -50,15 +51,19 @@ try:
     sessions_col = db["sessions"]
     mongo_client.admin.command('ping')
     print("✅ Connected to MongoDB successfully!")
+    MONGO_ERROR_MSG = "Connected"
+except ImportError as ie:
+    MONGO_ERROR_MSG = f"Library Missing: {ie} (Kripya requirements.txt me 'pymongo' aur 'dnspython' add karein)"
+    print(f"❌ {MONGO_ERROR_MSG}")
 except Exception as e:
-    err_msg = f"❌ MongoDB Connection Error: {e}\n⚠️ Kripya 'pip install pymongo[srv]' run karein aur MongoDB Atlas me Network Access 0.0.0.0/0 karein!"
-    print(err_msg)
+    MONGO_ERROR_MSG = f"Connection Failed: {e}"
+    print(f"❌ {MONGO_ERROR_MSG}")
 
 user_states = {}
 user_data = {}  
 active_snipers_dict = {}
 
-# --- 🔐 DATABASES (Cloud-Backed with Admin Alert) ---
+# --- 🔐 DATABASES (Cloud-Backed) ---
 def load_licenses():
     if licenses_col is None: return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}}
     try:
@@ -119,24 +124,19 @@ def init_user_db(user_id):
         }
         save_bot_data()
 
-# --- ☁️ STRING SESSION HELPERS (With Error Alerts) ---
+# --- ☁️️ STRING SESSION HELPERS ---
 def load_user_session(user_id):
     if sessions_col is None: return None
     try:
         res = sessions_col.find_one({"user_id": str(user_id)})
         if res and "session_string" in res:
             return res["session_string"]
-    except Exception as e: 
-        err = f"⚠️ **DATABASE ALERT:**\nMongoDB se session load nahi ho pa raha!\nUser: `{user_id}`\nError: `{e}`"
-        print(err)
-        if master_bot and master_bot.loop and master_bot.loop.is_running():
-            master_bot.loop.create_task(master_bot.send_message(MASTER_ID, err))
+    except Exception: pass
     return None
 
 def save_user_session(user_id, string_session):
     if sessions_col is None:
-        err = f"⚠️ **DATABASE ALERT:**\nMongoDB connect nahi hai. Session save nahi hua! Check MongoDB Settings."
-        print(err)
+        err = f"⚠️ **DATABASE TRACE:**\nMongoDB Connect Nahi Hua!\n\n**Asli Wajah (Error):**\n`{MONGO_ERROR_MSG}`"
         if master_bot and master_bot.loop and master_bot.loop.is_running():
             master_bot.loop.create_task(master_bot.send_message(MASTER_ID, err))
         return
@@ -147,8 +147,7 @@ def save_user_session(user_id, string_session):
             upsert=True
         )
     except Exception as e: 
-        err = f"⚠️ **DATABASE ALERT:**\nMongoDB me session save nahi ho pa raha! (Server restart par login ud jayega)\nUser: `{user_id}`\nError: `{e}`"
-        print(err)
+        err = f"⚠️ **DATABASE ALERT:**\nMongoDB me session save nahi ho pa raha!\nError: `{e}`"
         if master_bot and master_bot.loop and master_bot.loop.is_running():
             master_bot.loop.create_task(master_bot.send_message(MASTER_ID, err))
 
@@ -230,7 +229,7 @@ def get_mode_buttons(user_id):
 def get_control_buttons(validity_str):
     btns = [
         [Button.inline("🔴 Pause Bot", b"ctl_pause"), Button.inline("🟢 Resume Bot", b"ctl_run")],
-        [Button.inline("⚙️️ Manage Sources/Dest", b"manage_channels"), Button.inline("💾 Save Setup", b"save_current_preset")],
+        [Button.inline("⚙️ Manage Sources/Dest", b"manage_channels"), Button.inline("💾 Save Setup", b"save_current_preset")],
         [Button.inline("📂 Load Preset", b"list_presets"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
         [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Change Number", b"change_phone_number")]
     ]
@@ -294,7 +293,7 @@ class UserSniper:
         self.special_triggered = False 
         self.msg_map = {} 
         self.msg_map_keys = deque(maxlen=1000)
-        self.handlers = [] # Track handlers to prevent double-messages
+        self.handlers = [] 
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -306,7 +305,6 @@ class UserSniper:
             await asyncio.sleep(30)
 
 async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
-    # DUP-HANDLER FIX: Remove old sniper handlers before starting new one
     if user_id in active_snipers_dict:
         old_sniper = active_snipers_dict[user_id]
         old_sniper.is_running = False
@@ -460,7 +458,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 if sent_msg and bot_db[uid].get('use_over', True):
                     timer_sec = bot_db[uid].get('over_timer', 0)
                     if timer_sec > 0 and not item.get('is_god') and not item.get('is_pure_god') and not item.get('is_special'):
-                        custom_over = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
+                        custom_over = bot_db[uid].get('over_text', "❌️❌ OVER ❌️❌️")
                         asyncio.create_task(auto_over_message(client, target, sent_msg.id, timer_sec, custom_over))
                 return sent_msg.id if sent_msg else None
             except Exception as e: return None
@@ -584,8 +582,16 @@ async def start_command(event):
     init_user_db(user_id)
     if user_id == MASTER_ID:
         user_states[user_id] = None 
-        await event.reply("👑 **MASTER ADMIN CONTROL PANEL** 👑", buttons=get_admin_buttons())
+        
+        # 🚀 SMART STATUS CHECKER: Ab error seedha admin panel me upar dikhega!
+        if MONGO_ERROR_MSG == "Connected":
+            db_status = "🟢 MongoDB Cloud se Connected hai!"
+        else:
+            db_status = f"🔴 MONGODB ERROR:\n`{MONGO_ERROR_MSG}`"
+            
+        await event.reply(f"👑 **MASTER ADMIN CONTROL PANEL** 👑\n\n📊 **Database Status:** {db_status}", buttons=get_admin_buttons())
         return
+        
     if is_user_authorized(user_id) and check_subscription(user_id):
         time_left = get_time_left(user_id)
         validity_str = format_time_left(time_left)
@@ -854,7 +860,8 @@ async def callback_handler(event):
             return
         elif data == "adm_back":
             user_states[user_id] = None
-            await event.respond("👑 **MASTER ADMIN CONTROL PANEL** 👑", buttons=get_admin_buttons())
+            db_status = "🟢 MongoDB Cloud se Connected hai!" if MONGO_ERROR_MSG == "Connected" else f"🔴 MONGODB ERROR:\n`{MONGO_ERROR_MSG}`"
+            await event.respond(f"👑 **MASTER ADMIN CONTROL PANEL** 👑\n\n📊 **Database Status:** {db_status}", buttons=get_admin_buttons())
             return
 
     if data == "ctl_pause":
@@ -1197,7 +1204,7 @@ async def handle_text(event):
             session_string = client.session.save()
             save_user_session(user_id, session_string)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ **Login Successful! Session Cloud par save ho gaya hai! ☁️️**", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ **Login Successful! Session Cloud par save ho gaya hai! ☁**", buttons=get_mode_buttons(user_id))
         except SessionPasswordNeededError:
             user_states[user_id] = {'state': 'WAITING_PASSWORD'}
             await event.reply("🔒 2-Step Verification Password bhejein:")
@@ -1212,7 +1219,7 @@ async def handle_text(event):
             session_string = client.session.save()
             save_user_session(user_id, session_string)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️**", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁**", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
