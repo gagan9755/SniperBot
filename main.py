@@ -370,7 +370,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 if replacer_link: 
                     msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
                     msg_html = re.sub(r'(https?://)?t\.me/joinchat/[a-zA-Z0-9_-]+', replacer_link, msg_html)
-                    # Fixed for general URLs like web shares
                     msg_html = re.sub(r'https?://[^\s]+', replacer_link, msg_html)
                 if replacer_uname: 
                     msg_html = safe_replace_username(msg_html, replacer_uname)
@@ -380,7 +379,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if not text_content and not event.message.media: return
             extracted_items = []
             
-            # Combine Link and Mono detection properly
             link_pattern = r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?'
             found_links = re.findall(link_pattern, text_content)
             for l in found_links:
@@ -510,7 +508,7 @@ async def start_command(event):
             await event.reply(f"✅ **Welcome Back!** (⏳ `{validity_str}`)\n🎯 Target Mode select karein:", buttons=get_mode_buttons(user_id))
         else:
             user_states[user_id] = 'WAITING_PHONE'
-            await event.reply("📱 Apna **Telegram Phone Number** bhejein:")
+            await event.reply("📱 Apna **Telegram Phone Number** bhejein:", buttons=[[Button.inline("🏠 Home", b"back_to_mode")]] )
         return
     user_states[user_id] = 'WAITING_KEY'
     await event.reply("🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:")
@@ -564,9 +562,55 @@ async def callback_handler(event):
         return
 
     if user_id == MASTER_ID:
-        if data == "adm_gen_1_30":
+        if data == "adm_gen_5_30":
+            generated = [f"`{generate_key(days=30)}`" for _ in range(5)]
+            await event.respond("✅ **5 New Keys Generated:**\n\n" + "\n".join(generated), buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif data == "adm_gen_1_30":
             key = generate_key(days=30)
             await event.respond(f"✅ **1 New Key Generated:**\n\n`{key}`", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif data == "adm_gen_sp_30":
+            skey = generate_special_key(days=30)
+            await event.respond(f"🔐 **1 New Special Key (30 Days) Generated:**\n\n`{skey}`", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif data == "adm_custom_sp_key":
+            user_states[user_id] = 'WAITING_CUSTOM_SP_KEY'
+            await event.respond("⚙️ **Custom Special Key:**\nFormat: `<count> <time>`", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif data == "adm_special_users":
+            msg = "🔐 **Active Special Code Users:**\n\n"
+            for su, sinfo in license_db.get("special_users", {}).items():
+                exp = datetime.fromisoformat(sinfo['expires'])
+                msg += f"👤 User ID: `{su}`\n   🔑 Key: `{sinfo['key']}`\n   ⏳ Left: {format_time_left(exp - datetime.now())}\n\n"
+            await event.respond(msg if license_db.get("special_users") else "No active special users right now!", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif data == "adm_custom_key":
+            user_states[user_id] = 'WAITING_CUSTOM_KEY'
+            await event.respond("⚙️ **Custom Key:**\nFormat: `<count> <time>`", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif data == "adm_users":
+            msg = "👥 **Active Users:**\n\n"
+            for u, info in license_db.get("users", {}).items():
+                expires = datetime.fromisoformat(info['expires'])
+                msg += f"👤 `{info['name']}` (ID: `{u}`)\n   🔑 `{info['key']}`\n   ⏳ {format_time_left(expires - datetime.now())}\n\n"
+            await event.respond(msg if license_db.get("users") else "No active users!", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif data == "adm_set_channel":
+            user_states[user_id] = 'WAITING_CHANNEL_LINK'
+            await event.respond("🔗 **Official Channel Link:** Bhejein:", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif data == "adm_broadcast": 
+            user_states[user_id] = 'WAITING_BROADCAST'
+            await event.respond("📢 **Broadcast Message:** Type karke bhejein:", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif data == "adm_ban_prompt":
+            user_states[user_id] = 'WAITING_BAN_ID'
+            await event.respond("🚫 Jis user ko BAN karna hai, uski ID bhejein:", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif data == "adm_unban_prompt":
+            user_states[user_id] = 'WAITING_UNBAN_ID'
+            await event.respond("✅ UNBAN ke liye User ID bhejein:", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
             return
         elif data == "adm_back":
             user_states[user_id] = None
@@ -611,12 +655,11 @@ async def callback_handler(event):
         bot_db[uid]['dest_dict'][str(d_id)] = d_name
         save_bot_data()
         
-        # Initial Header/Footer/Over prompt before running
         await event.respond(
             "⚙️ **Setup Options:**\nKya aapko Header, Footer ya Over text rakhna hai?",
             buttons=[
                 [Button.inline("🔝 Edit/Set Header", b"ask_header"), Button.inline("🔚 Edit/Set Footer", b"ask_footer")],
-                [Button.inline("✏️ Edit Over Text", b"ask_over_text"), Button.inline("🚀 Run Bot Now", b"run_rush_0")],
+                [Button.inline("✏️️ Edit Over Text", b"ask_over_text"), Button.inline("🚀 Run Bot Now", b"run_rush_0")],
                 [Button.inline("🏠 Home", b"back_to_mode")]
             ]
         )
@@ -645,7 +688,58 @@ async def handle_text(event):
     uid = str(user_id)
     state = user_states.get(user_id)
 
-    # Dynamic Header / Footer / Over Saver with edit/remove flexibility
+    if user_id == MASTER_ID:
+        if state == 'WAITING_BROADCAST':
+            msg_count = 0
+            for u_id in license_db.get("users", {}).keys():
+                try:
+                    await master_bot.send_message(int(u_id), f"📢 **Admin Message:**\n\n{text}")
+                    msg_count += 1
+                except: pass
+            user_states[user_id] = None
+            await event.reply(f"✅ **Broadcast Successful!** Sent to {msg_count} users.", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif state == 'WAITING_BAN_ID':
+            if text in license_db.get("users", {}):
+                del license_db["users"][text]
+                save_licenses(license_db)
+                if int(text) in active_snipers_dict: active_snipers_dict[int(text)].is_running = False
+                user_states[user_id] = None
+                await event.reply(f"✅ User `{text}` BAN!", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            else: await event.reply("❌ User not found.", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif state == 'WAITING_UNBAN_ID':
+            found_key, key_info = None, None
+            for k, info in license_db.get("keys", {}).items():
+                if str(info.get("used_by")) == text:
+                    found_key, key_info = k, info
+                    break
+            if found_key:
+                license_db["users"][text] = {"name": "Unbanned User", "key": found_key, "expires": key_info["expires"]}
+                save_licenses(license_db)
+                user_states[user_id] = None
+                await event.reply(f"✅ User `{text}` UNBAN!", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            else: await event.reply("❌ Key not found.", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+        elif state == 'WAITING_CHANNEL_LINK':
+            link = f"https://t.me/{text[1:]}" if text.startswith('@') else f"https://{text}" if text.startswith('t.me/') else text
+            license_db["settings"]["official_channel"] = link
+            save_licenses(license_db)
+            user_states[user_id] = None
+            await event.reply("✅ Official Channel updated!", buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            return
+        elif state == 'WAITING_CUSTOM_KEY':
+            try:
+                parts = text.lower().split()
+                count, time_str = int(parts[0]), parts[1]
+                hours = int(time_str[:-1]) if time_str.endswith('h') else 0
+                days = int(time_str[:-1]) if time_str.endswith('d') else int(time_str) if not hours else 0
+                generated = [f"`{generate_key(days=days, hours=hours)}`" for _ in range(count)]
+                user_states[user_id] = None
+                await event.reply(f"✅ **{count} New Keys Generated:**\n\n" + "\n".join(generated), buttons=[[Button.inline("🔙 Back", b"adm_back")]])
+            except: await event.reply("⚠️ Format Error!", buttons=[[Button.inline("🔙 Cancel", b"adm_back")]])
+            return
+
     if isinstance(state, dict) and state.get('state') in ['WAITING_HEADER', 'WAITING_FOOTER', 'WAITING_OVER_TEXT']:
         st = state.get('state')
         if st == 'WAITING_HEADER':
@@ -743,7 +837,7 @@ async def handle_text(event):
             session_string = client.session.save()
             save_user_session(user_id, session_string)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️**", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ **Password Verified! Session Cloud par save ho gaya hai! ☁️️**", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
