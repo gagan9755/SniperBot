@@ -19,7 +19,7 @@ import os
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "🤖 Master Sniper Bot is SECURE and RUNNING 24/7!"
+    return "🤖 Master Sniper Bot is SECURE and RUNNING 24/7 (Fast Mode)!"
 def run_server():
     app.run(host='0.0.0.0', port=8080)
 Thread(target=run_server).start()
@@ -31,19 +31,27 @@ BOT_TOKEN = '8546884710:AAEidgEI9Xdu8GpxbEKEXQE9tyo6mupJEuY'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
-# 🌐 MONGODB CONFIGURATION (MasterBot)
+# 🌐 MONGODB CONFIGURATION (MasterBot - Only For Sessions)
 MONGO_URI = "mongodb+srv://shivujsisu_db_user:jt7IyjPvNpANLEcm@masterbot.xdbhl8f.mongodb.net/?appName=MasterBot"
+
+sessions_col = None
+MONGO_ERROR_MSG = "Unknown Error"
 
 try:
     from pymongo import MongoClient
-    mongo_client = MongoClient(MONGO_URI)
+    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=3000, tlsAllowInvalidCertificates=True)
+    mongo_client.admin.command('ping')
     db = mongo_client["master_sniper_db"]
-    licenses_col = db["licenses"]
-    bot_data_col = db["bot_data"]
     sessions_col = db["sessions"]
-    print("✅ Connected to MongoDB successfully!")
+    print("✅ Connected to MongoDB successfully! (Only Login Sessions will be saved to Cloud)")
+    MONGO_ERROR_MSG = "Connected"
+except ImportError as ie:
+    MONGO_ERROR_MSG = f"Library Missing: {ie}"
+    print(f"❌ {MONGO_ERROR_MSG}")
 except Exception as e:
-    print(f"❌ MongoDB Connection Error: {e}")
+    MONGO_ERROR_MSG = f"Connection Failed: {e}"
+    sessions_col = None
+    print(f"❌ {MONGO_ERROR_MSG}")
 
 master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
 
@@ -51,36 +59,36 @@ user_states = {}
 user_data = {}  
 active_snipers_dict = {}
 
-# --- 🔐 DATABASES (Cloud-Backed) ---
+# --- 📂 LOCAL DATABASES (Fast JSON for Settings, Keys, etc.) ---
 def load_licenses():
     try:
-        data = licenses_col.find_one({"_id": "config"})
-        if data:
-            data.pop("_id", None)
-            return data
-    except Exception as e: pass
-    return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
+        if os.path.exists("licenses.json"):
+            with open("licenses.json", "r") as f:
+                return json.load(f)
+    except Exception: pass
+    return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}}
 
 def save_licenses(data):
     try:
-        licenses_col.update_one({"_id": "config"}, {"$set": data}, upsert=True)
-    except Exception as e: pass
+        with open("licenses.json", "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception: pass
 
 license_db = load_licenses()
 
 def load_bot_data():
     try:
-        data = bot_data_col.find_one({"_id": "db"})
-        if data:
-            data.pop("_id", None)
-            return data
-    except Exception as e: pass
+        if os.path.exists("bot_data.json"):
+            with open("bot_data.json", "r") as f:
+                return json.load(f)
+    except Exception: pass
     return {}
 
 def save_bot_data():
     try:
-        bot_data_col.update_one({"_id": "db"}, {"$set": bot_db}, upsert=True)
-    except Exception as e: pass
+        with open("bot_data.json", "w") as f:
+            json.dump(bot_db, f, indent=4)
+    except Exception: pass
 
 bot_db = load_bot_data()
 
@@ -88,45 +96,60 @@ def init_user_db(user_id):
     uid = str(user_id)
     if uid not in bot_db:
         bot_db[uid] = {
-            'dest_dict': {}, 'source_dict': {}, 
+            'dest_dict': {}, 'source_dict': {},
             'sniper_mode': 'rush', 'lines_count': 4,
-            'is_running': False, 'is_paused': False, 
-            'replacer_link': None, 
-            'replacer_username': None, 
-            'custom_header': None, 
-            'custom_footer': None, 
-            'over_timer': 0, 
-            'over_text': "❌️❌️ OVER ❌️❌️",
-            'presets': {},
-            'setup_type': 'normal', 
-            'setup_mode_cache': 'normal',
-            'setup_lines_cache': 4,
-            'stats': {'forwarded': 0}
+            'is_running': False, 'is_paused': False,
+            'replacer_link': None, 'replacer_username': None,
+            'custom_header': None, 'custom_footer': None,
+            'over_timer': 0, 'over_text': "❌️❌ OVER ❌️❌",
+            'presets': {}, 'setup_type': 'normal',
+            'setup_mode_cache': 'normal', 'setup_lines_cache': 4,
+            'stats': {'forwarded': 0},
+            'session_string': None
         }
         save_bot_data()
 
 # --- ☁️ STRING SESSION HELPERS ---
 def load_user_session(user_id):
+    if sessions_col is None: return None
     try:
         res = sessions_col.find_one({"user_id": str(user_id)})
         if res and "session_string" in res:
             return res["session_string"]
-    except Exception as e: pass
+    except Exception: pass
     return None
 
 def save_user_session(user_id, string_session):
+    if sessions_col is None: return
     try:
         sessions_col.update_one(
             {"user_id": str(user_id)}, 
             {"$set": {"session_string": string_session}}, 
             upsert=True
         )
-    except Exception as e: pass
+    except Exception: pass
 
 def delete_user_session(user_id):
+    if sessions_col is None: return
     try:
         sessions_col.delete_one({"user_id": str(user_id)})
-    except Exception as e: pass
+    except Exception: pass
+
+async def ensure_client(user_id):
+    uid = str(user_id)
+    client = user_data.get(user_id, {}).get('client')
+    if client and client.is_connected(): return client
+    session_str = load_user_session(user_id)
+    if session_str:
+        new_c = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+        try:
+            await new_c.connect()
+            if await new_c.is_user_authorized():
+                if user_id not in user_data: user_data[user_id] = {}
+                user_data[user_id]['client'] = new_c
+                return new_c
+        except Exception: pass
+    return None
 
 # --- 🔐 LICENSE LOGIC ---
 def generate_key(days=0, hours=0):
@@ -143,46 +166,29 @@ def generate_special_key(days=0, hours=0):
     save_licenses(license_db)
     return key
 
-def is_user_authorized(user_id):
-    return str(user_id) in license_db["users"]
-
+def is_user_authorized(user_id): return str(user_id) in license_db["users"]
 def check_subscription(user_id):
     if not is_user_authorized(user_id): return False
-    expires_str = license_db["users"][str(user_id)]["expires"]
-    return datetime.now() < datetime.fromisoformat(expires_str)
-
+    return datetime.now() < datetime.fromisoformat(license_db["users"][str(user_id)]["expires"])
 def is_special_authorized(user_id):
-    uid = str(user_id)
-    if uid not in license_db["special_users"]: return False
-    expires_str = license_db["special_users"][uid]["expires"]
-    return datetime.now() < datetime.fromisoformat(expires_str)
-
+    if str(user_id) not in license_db["special_users"]: return False
+    return datetime.now() < datetime.fromisoformat(license_db["special_users"][str(user_id)]["expires"])
 def get_time_left(user_id):
     if not is_user_authorized(user_id): return None
-    expires_str = license_db["users"][str(user_id)]["expires"]
-    return datetime.fromisoformat(expires_str) - datetime.now()
-
+    return datetime.fromisoformat(license_db["users"][str(user_id)]["expires"]) - datetime.now()
 def get_special_time_left(user_id):
     uid = str(user_id)
     if uid not in license_db["special_users"]: return None
-    expires_str = license_db["special_users"][uid]["expires"]
-    return datetime.fromisoformat(expires_str) - datetime.now()
-
+    return datetime.fromisoformat(license_db["special_users"][uid]["expires"]) - datetime.now()
 def format_time_left(td):
     if not td or int(td.total_seconds()) <= 0: return "Expired"
     days, hours = int(td.total_seconds()) // 86400, (int(td.total_seconds()) % 86400) // 3600
     return f"{days} Days" if days > 0 else f"{hours} Hours"
 
 # --- 🧠 UI BUTTON HELPERS ---
-def get_official_btn_row():
-    link = license_db.get("settings", {}).get("official_channel", "")
-    if link: return [[Button.url("📢 Join Official Channel", url=link)]]
-    return None
-
 def get_official_btn_single():
     link = license_db.get("settings", {}).get("official_channel", "")
-    if link: return [Button.url("📢 Join Official Channel", url=link)]
-    return []
+    return [Button.url("📢 Join Official Channel", url=link)] if link else []
 
 def get_mode_buttons(user_id):
     btns = [
@@ -200,9 +206,9 @@ def get_mode_buttons(user_id):
 def get_control_buttons(validity_str):
     btns = [
         [Button.inline("🔴 Pause Bot", b"ctl_pause"), Button.inline("🟢 Resume Bot", b"ctl_run")],
-        [Button.inline("💾 Save Current Setup", b"save_current_preset"), Button.inline("📂 Load Preset", b"list_presets")],
-        [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
-        [Button.inline("🔄 Change Number", b"change_phone_number"), Button.inline("📊 My Stats", b"ctl_stats")]
+        [Button.inline("⚙️ Manage Sources/Dest", b"manage_channels"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
+        [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Change Number", b"change_phone_number")],
+        [Button.inline("📊 My Stats", b"ctl_stats")]
     ]
     off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
@@ -215,7 +221,8 @@ def get_admin_buttons():
         [Button.inline("👥 View Special Users", b"adm_special_users"), Button.inline("⚙️ Custom Key (Days/Hours)", b"adm_custom_key")],
         [Button.inline("👥 View Active Users", b"adm_users"), Button.inline("🔗 Set Official Channel", b"adm_set_channel")],
         [Button.inline("🚫 Ban User", b"adm_ban_prompt"), Button.inline("✅ Unban User", b"adm_unban_prompt")],
-        [Button.inline("📢 Broadcast Message", b"adm_broadcast")]
+        [Button.inline("📢 Broadcast Message", b"adm_broadcast")],
+        [Button.inline("👤 OPEN USER PANEL (My Sniper)", b"open_user_panel")]
     ]
 
 async def get_channel_buttons(client, action_type, require_admin=False, pinned_only=False):
@@ -238,10 +245,8 @@ def safe_replace_username(text, new_username):
     def save_code(match):
         code_blocks.append(match.group(0))
         return f"__CODE_BLOCK_{len(code_blocks)-1}__"
-    
-    protected_text = re.sub(r'<(code|pre>).*?<\/\1>', save_code, text, flags=re.DOTALL)
+    protected_text = re.sub(r'<(code|pre>).*?</\1>', save_code, text, flags=re.DOTALL)
     protected_text = re.sub(r'(?<![a-zA-Z0-9_])@[a-zA-Z0-9_]+', new_username, protected_text)
-    
     for i, block in enumerate(code_blocks):
         protected_text = protected_text.replace(f"__CODE_BLOCK_{i}__", block)
     return protected_text
@@ -258,14 +263,11 @@ class UserSniper:
         self.is_paused = bot_db[str(user_id)].get('is_paused', False)
         self.sniper_mode = sniper_mode 
         self.lines_count = lines_count
-        
         self.processed_ids_set = set()
-        self.processed_ids_queue = deque(maxlen=50)
-        self.seen_codes_set = set()
-        self.seen_codes_queue = deque(maxlen=100)
         self.special_triggered = False 
         self.msg_map = {} 
         self.msg_map_keys = deque(maxlen=1000)
+        self.handlers = [] 
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -274,7 +276,7 @@ class UserSniper:
                 dialogs = await self.client.get_dialogs(limit=30)
                 self.pinned_chats = {d.id for d in dialogs if d.pinned and d.id not in self.destinations}
             except: pass
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
 
 async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
     if user_id in active_snipers_dict:
@@ -340,12 +342,9 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
         text_content = event.message.message or ""
 
-        if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)[^\s]+', text_content, re.IGNORECASE):
-            return
-
         messages_to_send = []
 
-        # 🔥 SPECIAL MODE (RUSH & NORMAL) LOGIC
+        # 🔥 SPECIAL MODE (SECRET CODE EXTRACTOR - 1 Message Auto-Stop)
         if sniper.sniper_mode in ["sprush", "spnormal", "special"]:
             if not is_special_authorized(user_id):
                 sniper.is_running = False
@@ -370,22 +369,21 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if not extracted_items: return
             
             sniper.special_triggered = True
-
-            # Automatic Rush Logic for Special Mode
-            if sniper.sniper_mode == "sprush":
-                num = len(extracted_items)
-                lines = [f"`{extracted_items[0]}`"] * 3 if num == 1 else [f"`{extracted_items[0]}`"] * 2 + [f"`{extracted_items[1]}`"] * 2 if num == 2 else [f"`{c}`" for c in extracted_items]
-                messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_special': True})
+            c = extracted_items[0]
             
-            # Normal Logic for Special Mode (Asks for lines)
+            # Special Code - Rush Logic
+            if sniper.sniper_mode == "sprush" or sniper.sniper_mode == "special":
+                num = len(extracted_items)
+                lines = [f"`{extracted_items[0]}`"] * 3 if num == 1 else [f"`{extracted_items[0]}`"] * 2 + [f"`{extracted_items[1]}`"] * 2 if num == 2 else [f"`{x}`" for x in extracted_items]
+                messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_special': True})
+            # Special Code - Normal Logic
             else:
-                for c in extracted_items:
-                    body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
-                    final_text = ""
-                    if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
-                    final_text += body_text
-                    if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
-                    messages_to_send.append({'text': final_text, 'media': None, 'is_special': True})
+                body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
+                final_text = ""
+                if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
+                final_text += body_text
+                if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
+                messages_to_send.append({'text': final_text, 'media': None, 'is_special': True})
 
         elif sniper.sniper_mode == "god":
             if not text_content and not event.message.media: return
@@ -408,43 +406,46 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True})
 
         else:
-            if not text_content: return
+            # 🟢 NORMAL / RUSH / LINK MODE (Original Flawless Logic)
+            if not text_content and not event.message.media: return
             extracted_items = []
+            
             if sniper.sniper_mode == "link":
                 link_pattern = r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?(?:#[^\s]*)?'
                 found_links = re.findall(link_pattern, text_content)
-                for ent, ent_text in event.message.get_entities_text():
-                    if isinstance(ent, (types.MessageEntityUrl, types.MessageEntityTextUrl)) and ent_text not in found_links:
-                        found_links.append(ent_text)
                 for l in found_links:
-                    if l not in sniper.seen_codes_set and l not in extracted_items: extracted_items.append(l)
+                    if l not in extracted_items: extracted_items.append(l)
             else:
                 for ent, ent_text in event.message.get_entities_text():
-                    if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                        if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE): 
-                            continue
-                        if ent_text not in sniper.seen_codes_set and ent_text not in extracted_items:
-                            extracted_items.append(ent_text)
+                    if isinstance(ent, (MessageEntityCode, MessageEntityPre, types.MessageEntityUrl, types.MessageEntityTextUrl)):
+                        if ent_text not in extracted_items: extracted_items.append(ent_text)
 
+            # If no codes/links found, grab the whole plain text! (This fixes Normal mode failing)
+            if not extracted_items and text_content: 
+                extracted_items = [text_content]
+                
             if not extracted_items: return
-            for item in extracted_items:
-                if len(sniper.seen_codes_queue) == 100:
-                    sniper.seen_codes_set.discard(sniper.seen_codes_queue.popleft())
-                sniper.seen_codes_queue.append(item)
-                sniper.seen_codes_set.add(item)
 
+            body_texts = []
             if sniper.sniper_mode == "rush":
                 num = len(extracted_items)
                 lines = [f"`{extracted_items[0]}`"] * 3 if num == 1 else [f"`{extracted_items[0]}`"] * 2 + [f"`{extracted_items[1]}`"] * 2 if num == 2 else [f"`{c}`" for c in extracted_items]
-                messages_to_send.append({'text': "\n".join(lines), 'media': None, 'is_god': False})
+                body_texts = lines
             else:
-                for c in extracted_items: 
-                    body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
-                    final_text = ""
-                    if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
-                    final_text += body_text
-                    if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
-                    messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
+                for item in extracted_items:
+                    if item.startswith("http://") or item.startswith("https://"): 
+                        body_texts.append(item)
+                    else:
+                        repeated_lines = [f"`{item}`"] * sniper.lines_count if item != text_content else [item]
+                        body_texts.extend(repeated_lines)
+
+            final_body = "\n".join(body_texts)
+            final_text = ""
+            if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
+            final_text += final_body
+            if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
+
+            messages_to_send.append({'text': final_text, 'media': event.message.media if not text_content else None, 'is_god': False})
 
         reply_to_id = event.message.reply_to_msg_id
         sent_msgs_this_event = {}
@@ -594,7 +595,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         validity_str = format_time_left(time_left)
         mode_text = f"Multiple Sources ({len(source_chat_ids)})" if source_chat_ids else "Auto Pinned Chats"
         lines_info = f" ({sniper.lines_count} Lines)" if sniper.sniper_mode not in ["rush", "god", "sprush"] else ""
-        mode_name = "🔐 SPECIAL" if sniper.sniper_mode.startswith("sp") else "⚡ GOD" if sniper.sniper_mode == "god" else sniper.sniper_mode.capitalize()
+        mode_name = "🔐 SPECIAL" if sniper.sniper_mode.startswith("sp") or sniper.sniper_mode == "special" else "⚡ GOD" if sniper.sniper_mode == "god" else sniper.sniper_mode.capitalize()
         await master_bot.send_message(
             user_id, 
             f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Target Mode:** {mode_text}\n🛠 **Forwarding:** `{mode_name} Mode{lines_info}`\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{validity_str}`", 
@@ -633,11 +634,13 @@ async def start_command(event):
     user_id = event.sender_id
     init_user_db(user_id)
     
+    # 👑 1. MASTER ADMIN BYPASS
     if user_id == MASTER_ID:
         user_states[user_id] = None 
         await event.reply("👑 **MASTER ADMIN CONTROL PANEL** 👑", buttons=get_admin_buttons())
         return
         
+    # 👥 2. REGULAR USERS LOGIC
     if is_user_authorized(user_id):
         if check_subscription(user_id):
             time_left = get_time_left(user_id)
@@ -668,11 +671,11 @@ async def start_command(event):
             return
         else:
             user_states[user_id] = 'WAITING_KEY'
-            await event.reply("⚠️ **Aapki purani Key Expire ho chuki hai!**\n\nKripya apni **Nayi License Key (PIN)** yahan bhejein:", buttons=get_official_btn_row())
+            await event.reply("⚠️ **Aapki purani Key Expire ho chuki hai!**\n\nKripya apni **Nayi License Key (PIN)** yahan bhejein:", buttons=get_official_btn_single())
             return
 
     user_states[user_id] = 'WAITING_KEY'
-    await event.reply("🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:", buttons=get_official_btn_row())
+    await event.reply("🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:", buttons=get_official_btn_single())
 
 @master_bot.on(events.CallbackQuery)
 async def callback_handler(event):
@@ -758,14 +761,14 @@ async def callback_handler(event):
         save_bot_data()
         validity_str = format_time_left(get_time_left(user_id))
         await event.respond(f"🟡 **BOT IS PAUSED (OFF)** \n\n⏳ Validity: `{validity_str}`", buttons=get_control_buttons(validity_str))
-
+    
     elif data == "ctl_run":
         if user_id in active_snipers_dict: active_snipers_dict[user_id].is_paused = False
         bot_db[uid]['is_paused'] = False
         save_bot_data()
         validity_str = format_time_left(get_time_left(user_id))
         await event.respond(f"🟢 **BOT IS ON**\n\n⏳ Validity: `{validity_str}`", buttons=get_control_buttons(validity_str))
-
+    
     elif data == "save_current_preset":
         prompt_msg = await event.respond("💾 **Save Preset:**\n\nApne is setup ke liye ek pyara sa **Name** type karke bhejein:", buttons=[[Button.inline("🔙 Back", b"back_to_mode")]])
         user_states[user_id] = {'state': 'WAITING_PRESET_NAME', 'prompt_id': prompt_msg.id}
@@ -807,7 +810,7 @@ async def callback_handler(event):
             mode = bot_db[uid]['sniper_mode']
             lines = bot_db[uid]['lines_count']
 
-            if mode == 'special' and not is_special_authorized(user_id):
+            if mode in ['special', 'sprush', 'spnormal'] and not is_special_authorized(user_id):
                 await event.respond("❌ Is preset ke liye Special Key required hai!")
                 return
 
@@ -962,16 +965,18 @@ async def callback_handler(event):
     elif data == "more_source_sp":
         user_states[user_id] = {'state': 'SELECT_SOURCES_SP'}
         client = user_data.get(user_id, {}).get('client')
-        buttons = await get_channel_buttons(client, "add_source_sp", pinned_only=True)
-        buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-        await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karein / message forward karein):*", buttons=buttons)
+        if client and client.is_connected():
+            buttons = await get_channel_buttons(client, "add_source_sp", pinned_only=True)
+            buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
+            await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karein / message forward karein):*", buttons=buttons)
 
     elif data == "done_sources_sp":
         user_states[user_id] = {'state': 'SELECT_DEST_SP'}
         client = user_data.get(user_id, {}).get('client')
-        buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
-        buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-        await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein:", buttons=buttons)
+        if client and client.is_connected():
+            buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
+            buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
+            await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein:", buttons=buttons)
 
     elif data.startswith("add_dest_sp:") or data.startswith("rem_dest_sp:"):
         action, d_id = data.split(":")[0], data.split(":")[1]
@@ -999,9 +1004,10 @@ async def callback_handler(event):
     elif data == "more_dest_sp":
         user_states[user_id] = {'state': 'SELECT_DEST_SP'}
         client = user_data.get(user_id, {}).get('client')
-        buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
-        buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-        await event.respond("🎯 Agla **Destination Channel** select karein:", buttons=buttons)
+        if client and client.is_connected():
+            buttons = await get_channel_buttons(client, "add_dest_sp", require_admin=True)
+            buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
+            await event.respond("🎯 Agla **Destination Channel** select karein:", buttons=buttons)
 
     # 🔥 NEW SPECIAL MODE FORWARDING MENU
     elif data == "select_fwd_mode_sp":
@@ -1041,17 +1047,19 @@ async def callback_handler(event):
         user_states[user_id] = {'state': 'SELECT_SOURCES'}
         client = user_data.get(user_id, {}).get('client')
         is_god = (bot_db[uid].get('setup_type') == 'god')
-        buttons = await get_channel_buttons(client, "add_source", pinned_only=True)
-        buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
-        await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karein / message forward karein):*", buttons=buttons)
+        if client and client.is_connected():
+            buttons = await get_channel_buttons(client, "add_source", pinned_only=True)
+            buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
+            await event.respond("🎯 Agla **PINNED Source Channel** select karein\n*(Ya naam type karein / message forward karein):*", buttons=buttons)
 
     elif data == "done_sources":
         user_states[user_id] = {'state': 'SELECT_DEST_CUSTOM'}
         client = user_data.get(user_id, {}).get('client')
         is_god = (bot_db[uid].get('setup_type') == 'god')
-        buttons = await get_channel_buttons(client, "add_destcust", require_admin=True)
-        buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
-        await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein:", buttons=buttons)
+        if client and client.is_connected():
+            buttons = await get_channel_buttons(client, "add_destcust", require_admin=True)
+            buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
+            await event.respond("🎯 **Sources Saved!**\n\nAb **Destination Channel** select karein:", buttons=buttons)
 
     elif data.startswith("add_dest:") or data.startswith("add_destcust:") or data.startswith("rem_dest:"):
         action, d_id = data.split(":")[0], data.split(":")[1]
@@ -1092,9 +1100,10 @@ async def callback_handler(event):
         is_god = (bot_db[uid].get('setup_type') == 'god')
         back_route = b"mode_god_start" if is_god else b"back_to_mode"
         
-        buttons = await get_channel_buttons(client, "add_destcust" if is_custom else "add_dest", require_admin=True)
-        buttons.append([Button.inline("🔙 Back", back_route)])
-        await event.respond("🎯 Agla **Destination Channel** select karein:", buttons=buttons)
+        if client and client.is_connected():
+            buttons = await get_channel_buttons(client, "add_destcust" if is_custom else "add_dest", require_admin=True)
+            buttons.append([Button.inline("🔙 Back", back_route)])
+            await event.respond("🎯 Agla **Destination Channel** select karein:", buttons=buttons)
 
     elif data == "select_fwd_mode":
         await event.respond(
@@ -1147,7 +1156,7 @@ async def callback_handler(event):
         
         header = bot_db[uid].get('custom_header')
         footer = bot_db[uid].get('custom_footer')
-        over_text = bot_db[uid].get('over_text', "❌️❌️️ OVER ❌️❌️")
+        over_text = bot_db[uid].get('over_text', "❌️❌ OVER ❌️❌️")
         mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
         lines_cache = bot_db[uid].get('setup_lines_cache', 4)
 
@@ -1551,7 +1560,7 @@ async def handle_text(event):
             session_str = load_user_session(user_id)
             client = user_data.get(user_id, {}).get('client')
             if not client:
-                client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
+                client = TelegramClient(StringSession(session_str or ""), API_ID, API_HASH)
                 try:
                     await client.connect()
                 except Exception as e:
@@ -1586,10 +1595,10 @@ async def handle_text(event):
         try:
             client = user_data[user_id]['client']
             await client.sign_in(phone=state['phone'], code=text, phone_code_hash=user_data[user_id]['phone_code_hash'])
-
+            
             session_string = client.session.save()
             save_user_session(user_id, session_string)
-
+            
             user_states[user_id] = 'CHOOSE_MODE'
             await event.reply("✅ Login Successful! (Session Saved to Cloud ☁️)", buttons=get_mode_buttons(user_id))
         except SessionPasswordNeededError:
@@ -1603,17 +1612,17 @@ async def handle_text(event):
         try:
             client = user_data[user_id]['client']
             await client.sign_in(password=text)
-
+            
             session_string = client.session.save()
             save_user_session(user_id, session_string)
-
+            
             user_states[user_id] = 'CHOOSE_MODE'
             await event.reply("✅ Password Verified! (Session Saved to Cloud ☁️)", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
 
-print("👑 Master Bot Initialized Successfully with MongoDB Cloud!")
+print("👑 Master Bot Initialized Successfully (Fast Mode)!")
 master_bot.start(bot_token=BOT_TOKEN)
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
