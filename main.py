@@ -27,9 +27,9 @@ Thread(target=run_server).start()
 # --- ⚙️ MASTER CONFIGURATION ---
 API_ID = 21601452
 API_HASH = 'cc8257993f2553fec9f43bcd6b8f79c4'
-BOT_TOKEN = '8827028944:AAGylkDMFw-xyYXU1m5URMl9ARegvWoInQg' 
+BOT_TOKEN = '8546884710:AAEidgEI9Xdu8GpxbEKEXQE9tyo6mupJEuY' 
 
-MASTER_ID = 8546884710  # Your Admin ID
+MASTER_ID = 8845438009  # Your Admin ID
 
 # 🌐 MONGODB CONFIGURATION (MasterBot)
 MONGO_URI = "mongodb+srv://shivujsisu_db_user:jt7IyjPvNpANLEcm@masterbot.xdbhl8f.mongodb.net/?appName=MasterBot"
