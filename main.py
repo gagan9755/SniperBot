@@ -31,8 +31,8 @@ BOT_TOKEN = '8546884710:AAEidgEI9Xdu8GpxbEKEXQE9tyo6mupJEuY'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
-# 🌐 MONGODB CONFIGURATION (MasterBot)
-MONGO_URI = "mongodb+srv://shivujsisu_db_user:jt7IyjPvNpANLEcm@masterbot.xdbhl8f.mongodb.net/?appName=MasterBot"
+# 🌐 MONGODB CONFIGURATION
+MONGO_URI = "mongodb+srv://gkgamer12697_db_user:pPNrOmU6ueOs6Mc0@projectmybot.zujl82m.mongodb.net/?appName=ProjectMyBot"
 
 try:
     from pymongo import MongoClient
@@ -58,13 +58,15 @@ def load_licenses():
         if data:
             data.pop("_id", None)
             return data
-    except Exception as e: pass
+    except Exception as e:
+        print(f"❌ load_licenses Error: {e}")
     return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
 
 def save_licenses(data):
     try:
         licenses_col.update_one({"_id": "config"}, {"$set": data}, upsert=True)
-    except Exception as e: pass
+    except Exception as e:
+        print(f"❌ save_licenses Error: {e}")
 
 license_db = load_licenses()
 
@@ -74,13 +76,15 @@ def load_bot_data():
         if data:
             data.pop("_id", None)
             return data
-    except Exception as e: pass
+    except Exception as e:
+        print(f"❌ load_bot_data Error: {e}")
     return {}
 
 def save_bot_data():
     try:
         bot_data_col.update_one({"_id": "db"}, {"$set": bot_db}, upsert=True)
-    except Exception as e: pass
+    except Exception as e:
+        print(f"❌ save_bot_data Error: {e}")
 
 bot_db = load_bot_data()
 
@@ -111,7 +115,8 @@ def load_user_session(user_id):
         res = sessions_col.find_one({"user_id": str(user_id)})
         if res and "session_string" in res:
             return res["session_string"]
-    except Exception as e: pass
+    except Exception as e:
+        print(f"❌ load_user_session Error: {e}")
     return None
 
 def save_user_session(user_id, string_session):
@@ -121,12 +126,14 @@ def save_user_session(user_id, string_session):
             {"$set": {"session_string": string_session}}, 
             upsert=True
         )
-    except Exception as e: pass
+    except Exception as e:
+        print(f"❌ save_user_session Error: {e}")
 
 def delete_user_session(user_id):
     try:
         sessions_col.delete_one({"user_id": str(user_id)})
-    except Exception as e: pass
+    except Exception as e:
+        print(f"❌ delete_user_session Error: {e}")
 
 # --- 🔐 LICENSE LOGIC ---
 def generate_key(days=0, hours=0):
@@ -274,7 +281,7 @@ class UserSniper:
                 dialogs = await self.client.get_dialogs(limit=30)
                 self.pinned_chats = {d.id for d in dialogs if d.pinned and d.id not in self.destinations}
             except: pass
-            await asyncio.sleep(30)
+            await asyncio.sleep(60)
 
 async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
     if user_id in active_snipers_dict:
@@ -351,7 +358,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 bot_db[uid]['is_running'] = False
                 save_bot_data()
                 if user_id in active_snipers_dict: del active_snipers_dict[user_id]
-                try: await master_bot.send_message(user_id, "⚠️ **Aapki Special Key expire ho chuki hai ya authorized nahi hai!**")
+                try: await master_bot.send_message(user_id, "⚠️ **Aapki Special Key expire ho chuki hai ya authorized nahi hai!**\nSpecial Code mode stop ho gaya hai.")
                 except: pass
                 return
 
@@ -673,10 +680,14 @@ async def callback_handler(event):
             del active_snipers_dict[user_id]
         bot_db[uid]['is_running'] = False
         save_bot_data()
+        
+        # Delete old session from MongoDB
         delete_user_session(user_id)
-        if user_id in user_data: user_data[user_id].pop('client', None)
+        if user_id in user_data:
+            user_data[user_id].pop('client', None)
+            
         user_states[user_id] = 'WAITING_PHONE'
-        await event.respond("🔄 **Change Number / Account:**\nPurana session hata diya gaya hai.\n\n📱 Apna naya **Telegram Phone Number** bhejein:")
+        await event.respond("🔄 **Change Number / Account:**\n\nAapka purana login session hata diya gaya hai.\n\n📱 Ab apna naya **Telegram Phone Number** bhejein:")
         return
 
     if user_id == MASTER_ID:
