@@ -5,7 +5,6 @@ from collections import deque
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, types, Button
 from telethon.tl.types import MessageEntityCode, MessageEntityPre
-from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, FloodWaitError
 from telethon.extensions import html
 from flask import Flask
@@ -31,56 +30,43 @@ BOT_TOKEN = '8546884710:AAEidgEI9Xdu8GpxbEKEXQE9tyo6mupJEuY'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
-# 🌐 MONGODB CONFIGURATION
-MONGO_URI = "mongodb+srv://gkgamer12697_db_user:pPNrOmU6ueOs6Mc0@projectmybot.zujl82m.mongodb.net/?appName=ProjectMyBot"
-
-try:
-    from pymongo import MongoClient
-    mongo_client = MongoClient(MONGO_URI)
-    db = mongo_client["master_sniper_db"]
-    licenses_col = db["licenses"]
-    bot_data_col = db["bot_data"]
-    sessions_col = db["sessions"]
-    print("✅ Connected to MongoDB successfully!")
-except Exception as e:
-    print(f"❌ MongoDB Connection Error: {e}")
-
 master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
 
 user_states = {}
 user_data = {}  
 active_snipers_dict = {}
 
-# --- 🔐 DATABASES (Cloud-Backed) ---
+# --- 🔐 DATABASES ---
+LICENSE_FILE = "licenses.json"
+BOT_DATA_FILE = "bot_data.json"
+
 def load_licenses():
     try:
-        data = licenses_col.find_one({"_id": "config"})
-        if data:
-            data.pop("_id", None)
+        with open(LICENSE_FILE, 'r') as f:
+            data = json.load(f)
+            if "settings" not in data: data["settings"] = {"official_channel": ""}
+            if "special_keys" not in data: data["special_keys"] = {}
+            if "special_users" not in data: data["special_users"] = {}
             return data
-    except: pass
-    return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
+    except FileNotFoundError:
+        return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
 
 def save_licenses(data):
-    try:
-        licenses_col.update_one({"_id": "config"}, {"$set": data}, upsert=True)
-    except: pass
+    with open(LICENSE_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
 
 license_db = load_licenses()
 
 def load_bot_data():
     try:
-        data = bot_data_col.find_one({"_id": "db"})
-        if data:
-            data.pop("_id", None)
-            return data
-    except: pass
-    return {}
+        with open(BOT_DATA_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
 def save_bot_data():
-    try:
-        bot_data_col.update_one({"_id": "db"}, {"$set": bot_db}, upsert=True)
-    except: pass
+    with open(BOT_DATA_FILE, 'w') as f:
+        json.dump(bot_db, f, indent=4)
 
 bot_db = load_bot_data()
 
@@ -104,20 +90,6 @@ def init_user_db(user_id):
             'stats': {'forwarded': 0}
         }
         save_bot_data()
-
-# --- ☁️ STRING SESSION HELPERS ---
-def load_user_session(user_id):
-    try:
-        res = sessions_col.find_one({"user_id": str(user_id)})
-        if res and "session_string" in res:
-            return res["session_string"]
-    except: pass
-    return None
-
-def save_user_session(user_id, string_session):
-    try:
-        sessions_col.update_one({"user_id": str(user_id)}, {"$set": {"session_string": string_session}}, upsert=True)
-    except: pass
 
 # --- 🔐 LICENSE LOGIC ---
 def generate_key(days=0, hours=0):
@@ -256,7 +228,7 @@ class UserSniper:
         self.processed_ids_queue = deque(maxlen=50)
         self.seen_codes_set = set()
         self.seen_codes_queue = deque(maxlen=100)
-        self.special_triggered = False 
+        self.special_triggered = False # 🔒 Lock to ensure strictly 1st message only in Special Mode
         
         self.msg_map = {} 
         self.msg_map_keys = deque(maxlen=1000)
@@ -298,25 +270,17 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
     active_snipers_dict[user_id] = sniper
     asyncio.create_task(sniper.update_pinned_loop())
 
-    def remove_all_handlers():
-        try: client.remove_event_handler(handler)
-        except: pass
-        try: client.remove_event_handler(edit_handler)
-        except: pass
-        try: client.remove_event_handler(delete_handler)
-        except: pass
-
     @client.on(events.NewMessage())
     async def handler(event):
         if not sniper.is_running:
-            remove_all_handlers()
+            client.remove_event_handler(handler)
             return
 
         if not check_subscription(user_id):
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
             save_bot_data()
-            remove_all_handlers()
+            client.remove_event_handler(handler)
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
             try: await master_bot.send_message(user_id, "⚠️ **Aapki License Key expire ho chuki hai!**\nBot automatic stop ho gaya hai.")
             except: pass
@@ -333,14 +297,9 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         sniper.processed_ids_set.add(event.id)
 
         text_content = event.message.message or ""
-
-        # 🚫 PRIVATE LINK BLOCKER
-        if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)[^\s]+', text_content, re.IGNORECASE):
-            return
-
         messages_to_send = []
 
-        # 🔐 SPECIAL CODE MODE 
+        # 🔐 SPECIAL CODE MODE (Strict 1st Message Only, Full Speed, Instant Stop)
         if sniper.sniper_mode == "special":
             if not is_special_authorized(user_id):
                 sniper.is_running = False
@@ -351,6 +310,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 except: pass
                 return
 
+            # 🔒 Lock check: Agar pehle hi ek message trigger ho chuka hai, toh doosre/duplicate message ko seedha ignore kar do
             if sniper.special_triggered:
                 return
 
@@ -358,38 +318,33 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             extracted_items = []
             for ent, ent_text in event.message.get_entities_text():
                 if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                    if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE): 
-                        continue
+                    if "t.me/" in ent_text.lower() or "telegram.me/" in ent_text.lower(): continue
                     if ent_text not in extracted_items:
                         extracted_items.append(ent_text)
 
             if not extracted_items: return
             
+            # Lock set kar diya taaki doosra message ignore ho jaye
             sniper.special_triggered = True
+
             c = extracted_items[0]
             body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
             messages_to_send.append({'text': body_text, 'media': None, 'is_special': True})
 
-        # ⚡ GOD MODE 
+        # ⚡ GOD MODE
         elif sniper.sniper_mode == "god":
             if not text_content and not event.message.media: return
+            try:
+                msg_html = html.unparse(text_content, event.message.entities)
+            except:
+                msg_html = text_content
                 
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
-            
-            if not replacer_link and not replacer_uname:
-                messages_to_send.append({'is_pure_god': True, 'msg_obj': event.message})
-            else:
-                try: msg_html = html.unparse(text_content, event.message.entities)
-                except: msg_html = text_content
-                    
-                if replacer_link: 
-                    msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-                    msg_html = re.sub(r'(https?://)?t\.me/joinchat/[a-zA-Z0-9_-]+', replacer_link, msg_html)
-                if replacer_uname: 
-                    msg_html = safe_replace_username(msg_html, replacer_uname)
-                    
-                messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True})
+            if replacer_link: msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+            if replacer_uname: msg_html = safe_replace_username(msg_html, replacer_uname)
+                
+            messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True})
 
         else:
             if not text_content: return
@@ -405,8 +360,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             else:
                 for ent, ent_text in event.message.get_entities_text():
                     if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                        if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE): 
-                            continue
+                        if "t.me/" in ent_text.lower() or "telegram.me/" in ent_text.lower(): continue
                         if ent_text not in sniper.seen_codes_set and ent_text not in extracted_items:
                             extracted_items.append(ent_text)
 
@@ -430,89 +384,36 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
                     messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
 
-        # 🧠 BULLETPROOF SMART REPLY & SENDER LOGIC
-        reply_to_id = event.message.reply_to_msg_id
-        sent_msgs_this_event = {}
-
         async def send_to_single_destination(d_id, target, item):
             try:
-                reply_obj = None
-                if reply_to_id and reply_to_id in sniper.msg_map:
-                    dest_reply_id = sniper.msg_map[reply_to_id].get(d_id)
-                    if dest_reply_id:
-                        reply_obj = dest_reply_id
-                        reply_meta = getattr(event.message, 'reply_to', None)
-                        if reply_meta and getattr(reply_meta, 'quote_text', None):
-                            try:
-                                reply_obj = types.InputReplyToMessage(
-                                    reply_to_msg_id=dest_reply_id,
-                                    quote_text=reply_meta.quote_text,
-                                    quote_entities=getattr(reply_meta, 'quote_entities', []),
-                                    quote_offset=getattr(reply_meta, 'quote_offset', 0)
-                                )
-                            except Exception:
-                                reply_obj = dest_reply_id 
-
                 kwargs = {'link_preview': True}
-                if reply_obj: kwargs['reply_to'] = reply_obj
-
-                if item.get('is_pure_god'):
-                    msg_text = item['msg_obj'].message or ""
-                    if item['msg_obj'].entities: kwargs['formatting_entities'] = item['msg_obj'].entities
-                    if item['msg_obj'].media: kwargs['file'] = item['msg_obj'].media
-                else:
-                    msg_text = item['text'] or ""
+                if item.get('is_special') or item.get('is_god'):
                     kwargs['parse_mode'] = 'html' if item.get('is_god') else 'md'
                     if item.get('media'): kwargs['file'] = item['media']
-
-                sent_msg = None
-                try:
-                    sent_msg = await client.send_message(target, msg_text, **kwargs)
-                except Exception as e:
-                    if 'reply_to' in kwargs and isinstance(kwargs['reply_to'], types.InputReplyToMessage):
-                        kwargs['reply_to'] = kwargs['reply_to'].reply_to_msg_id
-                        try: sent_msg = await client.send_message(target, msg_text, **kwargs)
-                        except Exception: pass
+                    sent_msg = await client.send_message(target, item['text'], **kwargs)
+                else:
+                    kwargs['parse_mode'] = 'md'
+                    if item.get('media'): kwargs['file'] = item['media']
+                    sent_msg = await client.send_message(target, item['text'], **kwargs)
                     
-                    if not sent_msg and 'formatting_entities' in kwargs:
-                        del kwargs['formatting_entities']
-                        try: sent_msg = await client.send_message(target, msg_text, **kwargs)
-                        except Exception: pass
-
-                    if not sent_msg and 'reply_to' in kwargs:
-                        del kwargs['reply_to']
-                        try: sent_msg = await client.send_message(target, msg_text, **kwargs)
-                        except Exception: pass
-
                 if sent_msg:
                     timer_sec = bot_db[uid].get('over_timer', 0)
-                    if timer_sec > 0 and not item.get('is_god') and not item.get('is_pure_god') and not item.get('is_special'):
+                    if timer_sec > 0 and not item.get('is_god') and not item.get('is_special'):
                         custom_over = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
                         asyncio.create_task(auto_over_message(client, target, sent_msg.id, timer_sec, custom_over))
                     return d_id, sent_msg.id
-            except Exception as e: pass
+            except: pass
             return None
 
         for item in messages_to_send:
             if len(sniper.destinations) == 1:
                 for d_id, target in sniper.destinations.items():
-                    res = await send_to_single_destination(d_id, target, item)
-                    if res: sent_msgs_this_event[res[0]] = res[1]
+                    await send_to_single_destination(d_id, target, item)
             else:
                 tasks = [send_to_single_destination(d_id, target, item) for d_id, target in sniper.destinations.items()]
-                results = await asyncio.gather(*tasks)
-                for res in results:
-                    if res: sent_msgs_this_event[res[0]] = res[1]
+                await asyncio.gather(*tasks)
 
-        if sent_msgs_this_event:
-            if len(sniper.msg_map_keys) >= 1000:
-                old_id = sniper.msg_map_keys.popleft()
-                sniper.msg_map.pop(old_id, None)
-            sniper.msg_map_keys.append(event.id)
-            sniper.msg_map[event.id] = sent_msgs_this_event
-            bot_db[uid]['stats']['forwarded'] += 1
-            save_bot_data()
-
+        # 🛑 IF SPECIAL CODE MODE: FORWARD 1ST MESSAGE ONLY AND STOP INSTANTLY
         if sniper.sniper_mode == "special":
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
@@ -522,56 +423,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**\n\nBot automatically stop ho gaya hai. Dobara use karne ke liye naya setup karein.")
             except: pass
             return
-
-    @client.on(events.MessageEdited())
-    async def edit_handler(event):
-        if not sniper.is_running: return
-        if sniper.is_paused or sniper.sniper_mode != "god": return
-        if sniper.source_chat_ids and event.chat_id not in sniper.source_chat_ids: return
-        elif not sniper.source_chat_ids and event.chat_id not in sniper.pinned_chats: return
-
-        if event.id not in sniper.msg_map: return
-        
-        text_content = event.message.message or ""
-        replacer_link = bot_db[uid].get('replacer_link')
-        replacer_uname = bot_db[uid].get('replacer_username')
-        
-        try:
-            if not replacer_link and not replacer_uname:
-                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
-                    target = sniper.destinations.get(int(d_id))
-                    if target:
-                        edit_kwargs = {'text': text_content, 'file': event.message.media}
-                        if event.message.entities: edit_kwargs['formatting_entities'] = event.message.entities
-                        await client.edit_message(target, dest_msg_id, **edit_kwargs)
-            else:
-                msg_html = text_content
-                try: msg_html = html.unparse(text_content, event.message.entities)
-                except: pass
-                
-                if replacer_link: 
-                    msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-                    msg_html = re.sub(r'(https?://)?t\.me/joinchat/[a-zA-Z0-9_-]+', replacer_link, msg_html)
-                if replacer_uname: 
-                    msg_html = safe_replace_username(msg_html, replacer_uname)
-                
-                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
-                    target = sniper.destinations.get(int(d_id))
-                    if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media)
-        except Exception as e: pass
-
-    @client.on(events.MessageDeleted())
-    async def delete_handler(event):
-        if not sniper.is_running: return
-        if sniper.is_paused or sniper.sniper_mode != "god": return
-        
-        for deleted_id in event.deleted_ids:
-            if deleted_id in sniper.msg_map:
-                for d_id, dest_msg_id in sniper.msg_map[deleted_id].items():
-                    target = sniper.destinations.get(int(d_id))
-                    if target:
-                        try: await client.delete_messages(target, dest_msg_id)
-                        except: pass
 
     try:
         time_left = get_time_left(user_id)
@@ -597,8 +448,7 @@ async def auto_resume_snipers():
     for uid_str, data in bot_db.items():
         if data.get('is_running') and check_subscription(uid_str) and data.get('sniper_mode') != 'special':
             user_id = int(uid_str)
-            session_str = load_user_session(user_id)
-            client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
+            client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
             try:
                 await client.connect()
                 if await client.is_user_authorized():
@@ -634,10 +484,9 @@ async def start_command(event):
                 await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke liye niche buttons use karein:", buttons=get_control_buttons(validity_str))
                 return
 
-            session_str = load_user_session(user_id)
             client = user_data.get(user_id, {}).get('client')
             if not client:
-                client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
+                client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
                 await client.connect()
                 
             if await client.is_user_authorized():
@@ -764,8 +613,8 @@ async def callback_handler(event):
         presets = bot_db[uid].get('presets', {})
         if pname in presets:
             pdata = presets[pname]
-            bot_db[uid]['dest_dict'] = dict(pdata.get('dest_dict', {}))
-            bot_db[uid]['source_dict'] = dict(pdata.get('source_dict', {}))
+            bot_db[uid]['dest_dict'] = pdata.get('dest_dict', {})
+            bot_db[uid]['source_dict'] = pdata.get('source_dict', {})
             bot_db[uid]['sniper_mode'] = pdata.get('sniper_mode', 'rush')
             bot_db[uid]['lines_count'] = pdata.get('lines_count', 4)
             bot_db[uid]['replacer_link'] = pdata.get('replacer_link')
@@ -885,11 +734,11 @@ async def callback_handler(event):
             ]
         )
 
-    # 🎯 TARGET SELECTION (BUG FIX: Resetting source_dict properly for pinned mode)
+    # 🎯 TARGET SELECTION
     elif data in ["mode_pinned", "god_mode_pinned"]:
         is_god = data.startswith("god_")
         bot_db[uid]['setup_type'] = 'god' if is_god else 'normal'
-        bot_db[uid]['source_dict'] = {} # Pinned mode doesn't use specific source dict
+        bot_db[uid]['source_dict'] = {}
         save_bot_data()
         
         user_states[user_id] = {'state': 'SELECT_DEST'}
@@ -1012,7 +861,7 @@ async def callback_handler(event):
         if not bot_db[uid]['source_dict']: src_msg += "*(Koi source baki nahi hai)*\n"
         src_buttons.append([Button.inline("➕ Add Source", b"more_source")])
         if bot_db[uid]['source_dict']: src_buttons.append([Button.inline("🎯 Done, Select Destination", b"done_sources")])
-        src_buttons.append([Button.inline("🔙 Back", b"god_mode_source" if is_god else b"mode_source")])
+        src_buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
         await event.respond(src_msg, buttons=src_buttons)
 
     elif data == "more_source":
@@ -1245,7 +1094,7 @@ async def callback_handler(event):
         await event.respond(f"🚀 **Sniper Bot Start ho raha hai [{mode_disp} Mode]...**")
         await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count)
 
-# --- 💬 TEXT HANDLER & SMART LOGIN WITH STRING SESSION ---
+# --- 💬 TEXT HANDLER ---
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
     user_id = event.sender_id
@@ -1354,8 +1203,8 @@ async def handle_text(event):
         if "presets" not in bot_db[uid]: bot_db[uid]['presets'] = {}
         
         bot_db[uid]['presets'][pname] = {
-            'dest_dict': dict(bot_db[uid].get('dest_dict', {})),
-            'source_dict': dict(bot_db[uid].get('source_dict', {})),
+            'dest_dict': bot_db[uid].get('dest_dict', {}),
+            'source_dict': bot_db[uid].get('source_dict', {}),
             'sniper_mode': bot_db[uid].get('sniper_mode', 'rush'),
             'lines_count': bot_db[uid].get('lines_count', 4),
             'replacer_link': bot_db[uid].get('replacer_link'),
@@ -1491,10 +1340,9 @@ async def handle_text(event):
             license_db["users"][str(user_id)] = {"name": event.sender.first_name, "key": text, "expires": k_info["expires"]}
             save_licenses(license_db)
             
-            session_str = load_user_session(user_id)
             client = user_data.get(user_id, {}).get('client')
             if not client:
-                client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
+                client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
                 await client.connect()
                 
             if await client.is_user_authorized():
@@ -1513,7 +1361,7 @@ async def handle_text(event):
         user_states[user_id] = {'state': 'WAITING_OTP', 'phone': text}
         await event.reply("🔄 OTP bhej rahe hain...")
         try:
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
+            client = TelegramClient(f'session_{user_id}', API_ID, API_HASH)
             await client.connect()
             sent = await client.send_code_request(text)
             if user_id not in user_data: user_data[user_id] = {}
@@ -1527,15 +1375,9 @@ async def handle_text(event):
 
     elif isinstance(state, dict) and state.get('state') == 'WAITING_OTP':
         try:
-            client = user_data[user_id]['client']
-            await client.sign_in(phone=state['phone'], code=text, phone_code_hash=user_data[user_id]['phone_code_hash'])
-            
-            # ☁️ SAVE STRING SESSION TO MONGODB
-            session_string = client.session.save()
-            save_user_session(user_id, session_string)
-
+            await user_data[user_id]['client'].sign_in(phone=state['phone'], code=text, phone_code_hash=user_data[user_id]['phone_code_hash'])
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(f"✅ Login Successful! (Session Saved to Cloud ☁️)\n🎯 Ab Target Mode select karein:", buttons=get_mode_buttons(user_id))
+            await event.reply(f"✅ Login Successful!\n🎯 Ab Target Mode select karein:", buttons=get_mode_buttons(user_id))
         except SessionPasswordNeededError:
             user_states[user_id] = {'state': 'WAITING_PASSWORD'}
             await event.reply("🔒 2-Step Verification Password bhejein:")
@@ -1545,20 +1387,14 @@ async def handle_text(event):
 
     elif isinstance(state, dict) and state.get('state') == 'WAITING_PASSWORD':
         try:
-            client = user_data[user_id]['client']
-            await client.sign_in(password=text)
-            
-            # ☁️ SAVE STRING SESSION TO MONGODB
-            session_string = client.session.save()
-            save_user_session(user_id, session_string)
-
+            await user_data[user_id]['client'].sign_in(password=text)
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply(f"✅ Password Verified! (Session Saved to Cloud ☁️)\n🎯 Ab Target Mode select karein:", buttons=get_mode_buttons(user_id))
+            await event.reply(f"✅ Password Verified!\n🎯 Target Mode select karein:", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
 
-print("👑 Master Bot Initialized Successfully with MongoDB Cloud!")
+print("👑 Master Bot Initialized Successfully!")
 master_bot.start(bot_token=BOT_TOKEN)
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
