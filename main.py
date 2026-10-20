@@ -276,7 +276,7 @@ class UserSniper:
             except: pass
             await asyncio.sleep(30)
 
-async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4, trigger_event=None):
+async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4, event=None):
     if user_id in active_snipers_dict:
         active_snipers_dict[user_id].is_running = False
 
@@ -313,7 +313,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         except: pass
 
     @client.on(events.NewMessage())
-    async def handler(event):
+    async def handler(client_event):
         if not sniper.is_running:
             remove_all_handlers()
             return
@@ -331,15 +331,13 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         if sniper.is_paused or not sniper.destinations: return
             
         if sniper.source_chat_ids:
-            if event.chat_id not in sniper.source_chat_ids: return
+            if client_event.chat_id not in sniper.source_chat_ids: return
         else:
-            if event.chat_id not in sniper.pinned_chats: return
+            if client_event.chat_id not in sniper.pinned_chats: return
 
-        if event.id in sniper.processed_ids_set: return
+        if client_event.id in sniper.processed_ids_set: return
 
-        text_content = event.message.message or ""
-
-        # Global block removed to allow code extraction even if a private link exists in the message.
+        text_content = client_event.message.message or ""
 
         messages_to_send = []
 
@@ -357,7 +355,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
             if not text_content: return
             extracted_items = []
-            for ent, ent_text in event.message.get_entities_text():
+            for ent, ent_text in client_event.message.get_entities_text():
                 if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
                     # Ignore only private links, keep the rest
                     if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE):
@@ -377,22 +375,22 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if not extracted_items: return
             
             sniper.special_triggered = True
-            sniper.processed_ids_set.add(event.id)
+            sniper.processed_ids_set.add(client_event.id)
             c = extracted_items[0]
             body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
             messages_to_send.append({'text': body_text, 'media': None, 'is_special': True})
 
         elif sniper.sniper_mode == "god":
-            sniper.processed_ids_set.add(event.id)
-            if not text_content and not event.message.media: return
+            sniper.processed_ids_set.add(client_event.id)
+            if not text_content and not client_event.message.media: return
                 
             replacer_link = bot_db[uid].get('replacer_link')
             replacer_uname = bot_db[uid].get('replacer_username')
             
             if not replacer_link and not replacer_uname:
-                messages_to_send.append({'is_pure_god': True, 'msg_obj': event.message})
+                messages_to_send.append({'is_pure_god': True, 'msg_obj': client_event.message})
             else:
-                try: msg_html = html.unparse(text_content, event.message.entities)
+                try: msg_html = html.unparse(text_content, client_event.message.entities)
                 except: msg_html = text_content
                     
                 if replacer_link: 
@@ -401,7 +399,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 if replacer_uname: 
                     msg_html = safe_replace_username(msg_html, replacer_uname)
                     
-                messages_to_send.append({'text': msg_html, 'media': event.message.media, 'is_god': True})
+                messages_to_send.append({'text': msg_html, 'media': client_event.message.media, 'is_god': True})
 
         else:
             if not text_content: return
@@ -409,7 +407,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if sniper.sniper_mode == "link":
                 link_pattern = r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?(?:#[^\s]*)?'
                 found_links = re.findall(link_pattern, text_content)
-                for ent, ent_text in event.message.get_entities_text():
+                for ent, ent_text in client_event.message.get_entities_text():
                     if isinstance(ent, (types.MessageEntityUrl, types.MessageEntityTextUrl)) and ent_text.strip() not in found_links:
                         found_links.append(ent_text.strip())
                 for l in found_links:
@@ -419,7 +417,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                         if cl not in sniper.seen_codes_set and cl not in extracted_items: 
                             extracted_items.append(cl)
             else:
-                for ent, ent_text in event.message.get_entities_text():
+                for ent, ent_text in client_event.message.get_entities_text():
                     if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
                         if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE):
                             continue
@@ -441,7 +439,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 sniper.seen_codes_queue.append(item)
                 sniper.seen_codes_set.add(item)
             
-            sniper.processed_ids_set.add(event.id)
+            sniper.processed_ids_set.add(client_event.id)
 
             if sniper.sniper_mode == "rush":
                 final_lines = []
@@ -469,7 +467,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
                     messages_to_send.append({'text': final_text, 'media': None, 'is_god': False})
 
-        reply_to_id = event.message.reply_to_msg_id
+        reply_to_id = client_event.message.reply_to_msg_id
         sent_msgs_this_event = {}
 
         async def send_to_single_destination(d_id, target, item):
@@ -479,7 +477,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     dest_reply_id = sniper.msg_map[reply_to_id].get(d_id)
                     if dest_reply_id:
                         reply_obj = dest_reply_id
-                        reply_meta = getattr(event.message, 'reply_to', None)
+                        reply_meta = getattr(client_event.message, 'reply_to', None)
                         if reply_meta and getattr(reply_meta, 'quote_text', None):
                             try:
                                 reply_obj = types.InputReplyToMessage(
@@ -551,8 +549,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if len(sniper.msg_map_keys) >= 1000:
                 old_id = sniper.msg_map_keys.popleft()
                 sniper.msg_map.pop(old_id, None)
-            sniper.msg_map_keys.append(event.id)
-            sniper.msg_map[event.id] = sent_msgs_this_event
+            sniper.msg_map_keys.append(client_event.id)
+            sniper.msg_map[client_event.id] = sent_msgs_this_event
             bot_db[uid]['stats']['forwarded'] += 1
             save_bot_data()
 
@@ -567,28 +565,28 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             return
 
     @client.on(events.MessageEdited())
-    async def edit_handler(event):
+    async def edit_handler(client_event):
         if not sniper.is_running: return
         if sniper.is_paused or sniper.sniper_mode != "god": return
-        if sniper.source_chat_ids and event.chat_id not in sniper.source_chat_ids: return
-        elif not sniper.source_chat_ids and event.chat_id not in sniper.pinned_chats: return
-        if event.id not in sniper.msg_map: return
+        if sniper.source_chat_ids and client_event.chat_id not in sniper.source_chat_ids: return
+        elif not sniper.source_chat_ids and client_event.chat_id not in sniper.pinned_chats: return
+        if client_event.id not in sniper.msg_map: return
         
-        text_content = event.message.message or ""
+        text_content = client_event.message.message or ""
         replacer_link = bot_db[uid].get('replacer_link')
         replacer_uname = bot_db[uid].get('replacer_username')
         
         try:
             if not replacer_link and not replacer_uname:
-                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
+                for d_id, dest_msg_id in sniper.msg_map[client_event.id].items():
                     target = sniper.destinations.get(int(d_id))
                     if target:
-                        edit_kwargs = {'text': text_content, 'file': event.message.media}
-                        if event.message.entities: edit_kwargs['formatting_entities'] = event.message.entities
+                        edit_kwargs = {'text': text_content, 'file': client_event.message.media}
+                        if client_event.message.entities: edit_kwargs['formatting_entities'] = client_event.message.entities
                         await client.edit_message(target, dest_msg_id, **edit_kwargs)
             else:
                 msg_html = text_content
-                try: msg_html = html.unparse(text_content, event.message.entities)
+                try: msg_html = html.unparse(text_content, client_event.message.entities)
                 except: pass
                 
                 if replacer_link: 
@@ -597,16 +595,16 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 if replacer_uname: 
                     msg_html = safe_replace_username(msg_html, replacer_uname)
                 
-                for d_id, dest_msg_id in sniper.msg_map[event.id].items():
+                for d_id, dest_msg_id in sniper.msg_map[client_event.id].items():
                     target = sniper.destinations.get(int(d_id))
-                    if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media)
+                    if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=client_event.message.media)
         except Exception as e: pass
 
     @client.on(events.MessageDeleted())
-    async def delete_handler(event):
+    async def delete_handler(client_event):
         if not sniper.is_running: return
         if sniper.is_paused or sniper.sniper_mode != "god": return
-        for deleted_id in event.deleted_ids:
+        for deleted_id in client_event.deleted_ids:
             if deleted_id in sniper.msg_map:
                 for d_id, dest_msg_id in sniper.msg_map[deleted_id].items():
                     target = sniper.destinations.get(int(d_id))
@@ -625,13 +623,11 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         
         msg_text = f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Target Mode:** {mode_text}\n🛠 **Forwarding:** `{mode_name} Mode{lines_info}`\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{validity_str}`\n\nApna bot control karne ke liye niche buttons use karein:"
         
-        # 🔥 FIX: Use event.respond to guarantee the control panel appears instantly!
-        if trigger_event:
-            await trigger_event.respond(msg_text, buttons=get_control_buttons(validity_str))
+        if event is not None:
+            await event.respond(msg_text, buttons=get_control_buttons(validity_str))
         else:
             await master_bot.send_message(user_id, msg_text, buttons=get_control_buttons(validity_str))
-    except Exception as e: 
-        pass
+    except: pass
 
 async def auto_over_message(client, target, msg_id, delay, custom_over_text):
     await asyncio.sleep(delay)
@@ -843,7 +839,7 @@ async def callback_handler(event):
                 return
 
             await event.respond(f"✅ **Preset '{pname}' Loaded Successfully!**\n🚀 Bot Start ho raha hai...")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines, trigger_event=event)
+            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines, event)
         else:
             await event.respond("❌ Preset nahi mila!", buttons=[[Button.inline("🔙 Back", b"list_presets")]])
         return
@@ -1282,7 +1278,7 @@ async def callback_handler(event):
             source_list = [int(s) for s in src_keys] if src_keys else None
             mode_disp = "🔐 Special Code" if sniper_mode == "special" else "⚡ GOD" if sniper_mode == "god" else sniper_mode.capitalize()
             await event.respond(f"🚀 **Sniper Bot Start ho raha hai [{mode_disp} Mode]...**")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count, trigger_event=event)
+            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count, event=event)
 
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
