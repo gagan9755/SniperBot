@@ -276,7 +276,7 @@ class UserSniper:
             except: pass
             await asyncio.sleep(30)
 
-async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4, event=None):
+async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4, event_to_respond=None):
     if user_id in active_snipers_dict:
         active_snipers_dict[user_id].is_running = False
 
@@ -357,14 +357,12 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             extracted_items = []
             for ent, ent_text in client_event.message.get_entities_text():
                 if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                    # Ignore only private links, keep the rest
-                    if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE):
+                    if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE): 
                         continue
                     clean_text = ent_text.strip()
                     if clean_text and clean_text not in extracted_items:
                         extracted_items.append(clean_text)
 
-            # Plain text fallback
             if not extracted_items and text_content:
                 for line in text_content.strip().split('\n'):
                     cl = line.strip()
@@ -412,7 +410,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                         found_links.append(ent_text.strip())
                 for l in found_links:
                     cl = l.strip()
-                    # Skip private links even in link mode
                     if not re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', cl, re.IGNORECASE):
                         if cl not in sniper.seen_codes_set and cl not in extracted_items: 
                             extracted_items.append(cl)
@@ -425,7 +422,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                         if clean_text and clean_text not in sniper.seen_codes_set and clean_text not in extracted_items:
                             extracted_items.append(clean_text)
 
-            # Plain text fallback logic for normal/rush modes
             if not extracted_items and text_content:
                 for line in text_content.strip().split('\n'):
                     cl = line.strip()
@@ -560,7 +556,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             save_bot_data()
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
             try:
-                await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**\n\nBot automatically stop ho gaya hai.")
+                await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!\n\nBot automatically stop ho gaya hai.**")
             except: pass
             return
 
@@ -623,11 +619,12 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         
         msg_text = f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Target Mode:** {mode_text}\n🛠 **Forwarding:** `{mode_name} Mode{lines_info}`\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{validity_str}`\n\nApna bot control karne ke liye niche buttons use karein:"
         
-        if event is not None:
-            await event.respond(msg_text, buttons=get_control_buttons(validity_str))
+        if event_to_respond is not None:
+            await event_to_respond.respond(msg_text, buttons=get_control_buttons(validity_str))
         else:
             await master_bot.send_message(user_id, msg_text, buttons=get_control_buttons(validity_str))
-    except: pass
+    except Exception as e: 
+        pass
 
 async def auto_over_message(client, target, msg_id, delay, custom_over_text):
     await asyncio.sleep(delay)
@@ -711,7 +708,17 @@ async def callback_handler(event):
     try: await event.delete()
     except: pass
 
-    if data == "change_phone_number":
+    if data == "ask_change_phone_number":
+        await event.respond(
+            "⚠️ **Warning!**\n\nKya aap sach mein account change karna chahte hain? Aapka purana login delete ho jayega.",
+            buttons=[
+                [Button.inline("✅ YES, Logout", b"confirm_change_phone_number")],
+                [Button.inline("❌ NO, Cancel", b"back_to_mode")]
+            ]
+        )
+        return
+
+    if data == "confirm_change_phone_number":
         if user_id in active_snipers_dict:
             active_snipers_dict[user_id].is_running = False
             del active_snipers_dict[user_id]
@@ -839,7 +846,7 @@ async def callback_handler(event):
                 return
 
             await event.respond(f"✅ **Preset '{pname}' Loaded Successfully!**\n🚀 Bot Start ho raha hai...")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines, event)
+            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines, event_to_respond=event)
         else:
             await event.respond("❌ Preset nahi mila!", buttons=[[Button.inline("🔙 Back", b"list_presets")]])
         return
@@ -1278,7 +1285,7 @@ async def callback_handler(event):
             source_list = [int(s) for s in src_keys] if src_keys else None
             mode_disp = "🔐 Special Code" if sniper_mode == "special" else "⚡ GOD" if sniper_mode == "god" else sniper_mode.capitalize()
             await event.respond(f"🚀 **Sniper Bot Start ho raha hai [{mode_disp} Mode]...**")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count, event=event)
+            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count, event_to_respond=event)
 
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
