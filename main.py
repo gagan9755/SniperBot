@@ -266,6 +266,7 @@ class UserSniper:
         self.special_triggered = False 
         self.msg_map = {} 
         self.msg_map_keys = deque(maxlen=1000)
+        self.handlers = [] # Keep track of handlers
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -624,10 +625,15 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         
         msg_text = f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Target Mode:** {mode_text}\n🛠 **Forwarding:** `{mode_name} Mode{lines_info}`\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{validity_str}`\n\nApna bot control karne ke liye niche buttons use karein:"
         
+        # --- FIX APPLIED HERE ---
         if event_to_edit is not None:
-            await event_to_edit.edit(msg_text, buttons=get_control_buttons(validity_str))
-        else:
-            await master_bot.send_message(user_id, msg_text, buttons=get_control_buttons(validity_str))
+            try:
+                await event_to_edit.delete()
+            except Exception:
+                pass
+                
+        await master_bot.send_message(user_id, msg_text, buttons=get_control_buttons(validity_str))
+        
     except Exception as e: 
         pass
 
