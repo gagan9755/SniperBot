@@ -191,7 +191,7 @@ def get_mode_buttons(user_id):
         [Button.inline("⚡ GOD MODE (Clone + Stickers + Auto-Reply)", b"mode_god_start")],
         [Button.inline("🔐 Special Code Mode (Secret)", b"mode_special_start")],
         [Button.inline("📂 Saved Presets / Setups", b"list_presets")],
-        [Button.inline("🔄 Change Number / Account", b"ask_change_phone_number")]
+        [Button.inline("🔄 Change Number / Account", b"change_phone_number")]
     ]
     off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
@@ -202,8 +202,7 @@ def get_control_buttons(validity_str):
         [Button.inline("🔴 Pause Bot", b"ctl_pause"), Button.inline("🟢 Resume Bot", b"ctl_run")],
         [Button.inline("💾 Save Current Setup", b"save_current_preset"), Button.inline("📂 Load Preset", b"list_presets")],
         [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
-        [Button.inline("📊 My Stats", b"ctl_stats")],
-        [Button.inline("🔄 Change Number / Account", b"ask_change_phone_number")]
+        [Button.inline("🔄 Change Number", b"change_phone_number"), Button.inline("📊 My Stats", b"ctl_stats")]
     ]
     off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
@@ -277,7 +276,7 @@ class UserSniper:
             except: pass
             await asyncio.sleep(30)
 
-async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
+async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_ids=None, sniper_mode="rush", lines_count=4, trigger_event=None):
     if user_id in active_snipers_dict:
         active_snipers_dict[user_id].is_running = False
 
@@ -445,7 +444,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             sniper.processed_ids_set.add(event.id)
 
             if sniper.sniper_mode == "rush":
-                # --- FIRE.PY RUSH LOGIC INCORPORATED ---
                 final_lines = []
                 num_codes = len(extracted_items)
                 
@@ -463,7 +461,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 final_msg = "\n".join(final_lines)
                 messages_to_send.append({'text': final_msg, 'media': None, 'is_god': False})
             else:
-                for c in extracted_items: 
+                for c in extracted_items:
                     body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
                     final_text = ""
                     if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
@@ -624,12 +622,16 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         mode_text = f"Multiple Sources ({len(source_chat_ids)})" if source_chat_ids else "Auto Pinned Chats"
         lines_info = f" ({sniper.lines_count} Lines)" if sniper.sniper_mode not in ["rush", "god", "special"] else ""
         mode_name = "🔐 SPECIAL" if sniper.sniper_mode == "special" else "⚡ GOD" if sniper.sniper_mode == "god" else sniper.sniper_mode.capitalize()
-        await master_bot.send_message(
-            user_id, 
-            f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Target Mode:** {mode_text}\n🛠 **Forwarding:** `{mode_name} Mode{lines_info}`\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{validity_str}`", 
-            buttons=get_control_buttons(validity_str)
-        )
-    except: pass
+        
+        msg_text = f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Target Mode:** {mode_text}\n🛠 **Forwarding:** `{mode_name} Mode{lines_info}`\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{validity_str}`\n\nApna bot control karne ke liye niche buttons use karein:"
+        
+        # 🔥 FIX: Use event.respond to guarantee the control panel appears instantly!
+        if trigger_event:
+            await trigger_event.respond(msg_text, buttons=get_control_buttons(validity_str))
+        else:
+            await master_bot.send_message(user_id, msg_text, buttons=get_control_buttons(validity_str))
+    except Exception as e: 
+        pass
 
 async def auto_over_message(client, target, msg_id, delay, custom_over_text):
     await asyncio.sleep(delay)
@@ -713,17 +715,7 @@ async def callback_handler(event):
     try: await event.delete()
     except: pass
 
-    if data == "ask_change_phone_number":
-        await event.respond(
-            "⚠️ **Warning!**\n\nKya aap sach mein account change karna chahte hain? Aapka purana login delete ho jayega.",
-            buttons=[
-                [Button.inline("✅ YES, Logout", b"confirm_change_phone_number")],
-                [Button.inline("❌ NO, Cancel", b"back_to_mode")]
-            ]
-        )
-        return
-
-    if data == "confirm_change_phone_number":
+    if data == "change_phone_number":
         if user_id in active_snipers_dict:
             active_snipers_dict[user_id].is_running = False
             del active_snipers_dict[user_id]
@@ -796,14 +788,14 @@ async def callback_handler(event):
         bot_db[uid]['is_paused'] = True
         save_bot_data()
         validity_str = format_time_left(get_time_left(user_id))
-        await event.respond(f"🟡 **BOT IS PAUSED (OFF)**\n\n⏳ **Validity:** `{validity_str}`", buttons=get_control_buttons(validity_str))
+        await event.respond(f"🟡 **BOT IS PAUSED (OFF)**\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke liye niche buttons use karein:", buttons=get_control_buttons(validity_str))
     
     elif data == "ctl_run":
         if user_id in active_snipers_dict: active_snipers_dict[user_id].is_paused = False
         bot_db[uid]['is_paused'] = False
         save_bot_data()
         validity_str = format_time_left(get_time_left(user_id))
-        await event.respond(f"🟢 **BOT IS ON**\n\n⏳ **Validity:** `{validity_str}`", buttons=get_control_buttons(validity_str))
+        await event.respond(f"🟢 **BOT IS ON**\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke liye niche buttons use karein:", buttons=get_control_buttons(validity_str))
     
     elif data == "save_current_preset":
         prompt_msg = await event.respond("💾 **Save Preset:**\n\nApne is setup ke liye ek pyara sa **Name** type karke bhejein:", buttons=[[Button.inline("🔙 Back", b"back_to_mode")]])
@@ -851,7 +843,7 @@ async def callback_handler(event):
                 return
 
             await event.respond(f"✅ **Preset '{pname}' Loaded Successfully!**\n🚀 Bot Start ho raha hai...")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines)
+            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, mode, lines, trigger_event=event)
         else:
             await event.respond("❌ Preset nahi mila!", buttons=[[Button.inline("🔙 Back", b"list_presets")]])
         return
@@ -1290,7 +1282,7 @@ async def callback_handler(event):
             source_list = [int(s) for s in src_keys] if src_keys else None
             mode_disp = "🔐 Special Code" if sniper_mode == "special" else "⚡ GOD" if sniper_mode == "god" else sniper_mode.capitalize()
             await event.respond(f"🚀 **Sniper Bot Start ho raha hai [{mode_disp} Mode]...**")
-            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count)
+            await start_sniper_for_user(user_id, client, dest_list, "User", source_list, sniper_mode, lines_count, trigger_event=event)
 
 @master_bot.on(events.NewMessage())
 async def handle_text(event):
@@ -1609,7 +1601,11 @@ async def handle_text(event):
     elif isinstance(state, dict) and state.get('state') == 'WAITING_OTP':
         try:
             client = user_data[user_id]['client']
-            await client.sign_in(phone=state['phone'], code=text, phone_code_hash=user_data[user_id]['phone_code_hash'])
+            
+            # 🔥 Auto OTP Cleaner: Remove spaces and hyphens from OTP
+            clean_code = text.replace(" ", "").replace("-", "")
+            
+            await client.sign_in(phone=state['phone'], code=clean_code, phone_code_hash=user_data[user_id]['phone_code_hash'])
             
             session_string = client.session.save()
             save_user_session(user_id, session_string)
