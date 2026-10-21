@@ -1,4 +1,3 @@
-```python
 import asyncio
 import time
 import re
@@ -1647,4 +1646,3 @@ print("👑 Master Bot Initialized Successfully with MongoDB Cloud!")
 master_bot.start(bot_token=BOT_TOKEN)
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
-```
