@@ -4,7 +4,7 @@ import re
 from collections import deque
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, types, Button
-from telethon.tl.types import MessageEntityCode, MessageEntityPre
+from telethon.tl.types import MessageEntityCode, MessageEntityPre, PeerChannel, PeerChat
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, FloodWaitError
 from telethon.extensions import html
@@ -27,7 +27,7 @@ Thread(target=run_server).start()
 # --- ⚙️ MASTER CONFIGURATION ---
 API_ID = 21601452
 API_HASH = 'cc8257993f2553fec9f43bcd6b8f79c4'
-BOT_TOKEN = '8546884710:AAEidgEI9Xdu8GpxbEKEXQE9tyo6mupJEuY' 
+BOT_TOKEN = '8546884710:AAF1lcYQwJiu0q0KWpwvK95MxuncBfXzg34' 
 
 MASTER_ID = 8845438009  # Your Admin ID
 
@@ -859,7 +859,7 @@ async def callback_handler(event):
             if client and client.is_connected():
                 buttons = await get_channel_buttons(client, "add_source_sp", pinned_only=True)
                 buttons.append([Button.inline("🔙 Back", b"mode_special_start")])
-                await event.respond("🎯 **Special Code Mode:**\n📥 Apna Source Channel select karein\n*(Ya channel ka naam type karein / Source message forward karein):*", buttons=buttons)
+                await event.respond("🎯 **Special Code Mode:**\n📥 Apna Source Channel select karein\n*(Ya channel ka naam type karein / message forward karein):*", buttons=buttons)
         else:
             user_states[user_id] = {'state': 'SELECT_DEST_SP'}
             client = user_data.get(user_id, {}).get('client')
@@ -889,7 +889,7 @@ async def callback_handler(event):
         
         if client and client.is_connected():
             buttons = await get_channel_buttons(client, "add_dest", require_admin=True)
-            buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"mode_to_mode")])
+            buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
             title_prefix = "⚡ GOD MODE: " if is_god else ""
             await event.respond(f"{title_prefix}📌 **Pinned Mode:**\n🎯 Apna Destination select karein\n*(Ya channel ka naam type karein):*", buttons=buttons)
         else: await event.respond("📱 Pehle apna Telegram Phone Number bhejein:")
@@ -906,7 +906,7 @@ async def callback_handler(event):
             buttons = await get_channel_buttons(client, "add_source", pinned_only=True)
             buttons.append([Button.inline("🔙 Back", b"mode_god_start" if is_god else b"back_to_mode")])
             title_prefix = "⚡ GOD MODE: " if is_god else ""
-            await event.respond(f"{title_prefix}🎯 **Specific Source Mode:**\n📥 Apna Source select karein\n*(Ya channel ka naam type karein / Source message forward karein):*", buttons=buttons)
+            await event.respond(f"{title_prefix}🎯 **Specific Source Mode:**\n📥 Apna Source select karein\n*(Ya channel ka naam type karein / message forward karein):*", buttons=buttons)
         else: await event.respond("📱 Pehle apna Telegram Phone Number bhejein:")
 
     elif data.startswith("add_source_sp:") or data.startswith("rem_source_sp:"):
@@ -1333,7 +1333,7 @@ async def handle_text(event):
         await event.respond(f"✅ **Preset '{pname}' Saved!**", buttons=[[Button.inline("📂 View Presets", b"list_presets"), Button.inline("🔙 Back", b"back_to_mode")]])
         return
 
-    # 🚀 FORWARDED MESSAGE & SMART SEARCH DETECTOR FOR SOURCES
+    # 🚀 ADVANCED FORWARDED MESSAGE & SMART SEARCH DETECTOR FOR SOURCES
     if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES', 'SELECT_SOURCES_SP']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
@@ -1344,17 +1344,52 @@ async def handle_text(event):
         forwarded_chat_id = None
         forwarded_chat_title = None
         
-        # Check if message is forwarded from a channel/group
-        if event.message.forward:
-            fwd = event.message.forward
-            if fwd.chat:
+        # Robust forward detection (checking both event.message.forward and raw peer)
+        fwd = getattr(event.message, 'forward', None)
+        if fwd:
+            if getattr(fwd, 'chat', None):
                 forwarded_chat_id = fwd.chat.id
                 forwarded_chat_title = getattr(fwd.chat, 'title', None) or getattr(fwd.chat, 'username', 'Source Channel')
-            elif fwd.from_id:
-                pass # User forward not supported, only channels/groups
+            elif getattr(fwd, 'from_id', None):
+                from_id = fwd.from_id
+                if isinstance(from_id, PeerChannel):
+                    forwarded_chat_id = from_id.channel_id
+                elif isinstance(from_id, PeerChat):
+                    forwarded_chat_id = -from_id.chat_id
+
+        # If direct fwd chat object is missing, try resolving via Telethon entity if peer is available
+        if not forwarded_chat_id and fwd:
+            try:
+                if hasattr(fwd, 'saved_from_peer') and fwd.saved_from_peer:
+                    resolved = await client.get_entity(fwd.saved_from_peer)
+                    forwarded_chat_id = resolved.id
+                    forwarded_chat_title = getattr(resolved, 'title', 'Source Channel')
+            except Exception: pass
+
+        if not forwarded_chat_id and hasattr(event.message, 'fwd_from') and event.message.fwd_from:
+            try:
+                fwd_from = event.message.fwd_from
+                if hasattr(fwd_from, 'from_id') and fwd_from.from_id:
+                    resolved = await client.get_entity(fwd_from.from_id)
+                    forwarded_chat_id = resolved.id
+                    forwarded_chat_title = getattr(resolved, 'title', 'Source Channel')
+            except Exception: pass
 
         if forwarded_chat_id:
-            bot_db[uid]['source_dict'][str(forwarded_chat_id)] = forwarded_chat_title[:15]
+            # Normalize channel id for telethon if needed
+            if not str(forwarded_chat_id).startswith("-100") and abs(forwarded_chat_id) < 1000000000000:
+                full_dest_id = int(f"-100{abs(forwarded_chat_id)}")
+            else:
+                full_dest_id = forwarded_chat_id
+
+            if not forwarded_chat_title:
+                try:
+                    ent = await client.get_entity(full_dest_id)
+                    forwarded_chat_title = getattr(ent, 'title', 'Source Channel')
+                except:
+                    forwarded_chat_title = "Source Channel"
+
+            bot_db[uid]['source_dict'][str(full_dest_id)] = forwarded_chat_title[:15]
             save_bot_data()
             
             src_msg = "✅ **Selected Source Channels:**\n"
@@ -1452,7 +1487,7 @@ async def handle_text(event):
         if is_link: bot_db[uid]['replacer_link'] = text
         else:
             if not text.startswith('@'): text = '@' + text
-            bot_db[uid]['repl_username'] = text
+            bot_db[uid]['replacer_username'] = text
         save_bot_data()
         try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
         except: pass
@@ -1534,6 +1569,5 @@ async def handle_text(event):
 
 print("👑 Master Bot Initialized Successfully with MongoDB Cloud!")
 master_bot.start(bot_token=BOT_TOKEN)
-master_bot.loop.create_action = auto_resume_snipers
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
