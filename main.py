@@ -340,8 +340,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
         text_content = event.message.message or ""
 
-        if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)[^\s]+', text_content, re.IGNORECASE):
-            return
+        # YAHAN SE GLOBAL BLOCKER HATA DIYA HAI 
+        # Taki koi bhi message starting me block na ho
 
         messages_to_send = []
 
@@ -361,6 +361,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             extracted_items = []
             for ent, ent_text in event.message.get_entities_text():
                 if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                    # Ye line sirf private link (+, joinchat, c) ko ignore karegi
+                    # Agar public link (t.me/username) ya code hoga toh wo extract ho jayega
                     if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE): 
                         continue
                     if ent_text not in extracted_items:
@@ -407,6 +409,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             else:
                 for ent, ent_text in event.message.get_entities_text():
                     if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                        # Sirf private link (joinchat/+, c) ignore hogi
+                        # Public link (t.me/username) extract hogi
                         if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE): 
                             continue
                         if ent_text not in sniper.seen_codes_set and ent_text not in extracted_items:
