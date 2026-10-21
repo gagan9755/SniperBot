@@ -22,7 +22,8 @@ app = Flask(__name__)
 def home():
     return "🤖 Master Sniper Bot is SECURE and RUNNING 24/7!"
 def run_server():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 Thread(target=run_server, daemon=True).start()
 
 # --- ⚙️ MASTER CONFIGURATION ---
