@@ -1553,6 +1553,7 @@ async def handle_text(event):
             sent = await client.send_code_request(text)
             if user_id not in user_data: user_data[user_id] = {}
             user_data[user_id].update({'client': client, 'phone_code_hash': sent.phone_code_hash})
+            await event.reply("✅ OTP aapke Telegram app par bhej diya gaya hai!\n\nKripya apna OTP yahan type karein:")
         except Exception as e:
             await event.reply(f"❌ Error: {e}")
             user_states[user_id] = None
