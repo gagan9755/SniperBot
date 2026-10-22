@@ -1591,4 +1591,3 @@ print("👑 Ultimate Master Bot V2 Initialized Successfully!")
 master_bot.start(bot_token=BOT_TOKEN)
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
-```eof
