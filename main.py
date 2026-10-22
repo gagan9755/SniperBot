@@ -19,7 +19,7 @@ import os
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "🤖 Master Sniper Bot is SECURE and RUNNING 24/7!"
+    return "🤖 Master Sniper Bot is SECURE and RUNNING 24/7 (Local Storage Mode)!"
 def run_server():
     app.run(host='0.0.0.0', port=8080)
 Thread(target=run_server).start()
@@ -31,60 +31,50 @@ BOT_TOKEN = '8546884710:AAEidgEI9Xdu8GpxbEKEXQE9tyo6mupJEuY'
 
 MASTER_ID = 8845438009  # Your Admin ID
 
-# 🌐 MONGODB CONFIGURATION
-MONGO_URI = "mongodb+srv://gkgamer12697_db_user:pPNrOmU6ueOs6Mc0@projectmybot.zujl82m.mongodb.net/?appName=ProjectMyBot"
-
-try:
-    from pymongo import MongoClient
-    mongo_client = MongoClient(MONGO_URI)
-    db = mongo_client["master_sniper_db"]
-    licenses_col = db["licenses"]
-    bot_data_col = db["bot_data"]
-    sessions_col = db["sessions"]
-    print("✅ Connected to MongoDB successfully!")
-except Exception as e:
-    print(f"❌ MongoDB Connection Error: {e}")
-
 master_bot = TelegramClient('master_bot_session', API_ID, API_HASH)
 
 user_states = {}
 user_data = {}  
 active_snipers_dict = {}
 
-# --- 🔐 DATABASES (Cloud-Backed) ---
-def load_licenses():
+# --- 📁 LOCAL JSON DATABASE SYSTEM (No MongoDB) ---
+LICENSES_FILE = "licenses.json"
+BOT_DATA_FILE = "bot_data.json"
+SESSIONS_FILE = "sessions.json"
+
+def load_json(filepath, default_data):
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading {filepath}: {e}")
+            return default_data
+    return default_data
+
+def save_json(filepath, data):
     try:
-        data = licenses_col.find_one({"_id": "config"})
-        if data:
-            data.pop("_id", None)
-            return data
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=4)
     except Exception as e:
-        print(f"❌ load_licenses Error: {e}")
-    return {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}} 
+        print(f"Error saving {filepath}: {e}")
+
+# --- LICENSES DB ---
+def load_licenses():
+    default = {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}}
+    return load_json(LICENSES_FILE, default)
 
 def save_licenses(data):
-    try:
-        licenses_col.update_one({"_id": "config"}, {"$set": data}, upsert=True)
-    except Exception as e:
-        print(f"❌ save_licenses Error: {e}")
+    save_json(LICENSES_FILE, data)
 
 license_db = load_licenses()
 
+# --- BOT DATA DB ---
 def load_bot_data():
-    try:
-        data = bot_data_col.find_one({"_id": "db"})
-        if data:
-            data.pop("_id", None)
-            return data
-    except Exception as e:
-        print(f"❌ load_bot_data Error: {e}")
-    return {}
+    return load_json(BOT_DATA_FILE, {})
 
 def save_bot_data():
-    try:
-        bot_data_col.update_one({"_id": "db"}, {"$set": bot_db}, upsert=True)
-    except Exception as e:
-        print(f"❌ save_bot_data Error: {e}")
+    save_json(BOT_DATA_FILE, bot_db)
 
 bot_db = load_bot_data()
 
@@ -110,25 +100,21 @@ def init_user_db(user_id):
         }
         save_bot_data()
 
-# --- ☁️ STRING SESSION HELPERS ---
+# --- SESSIONS DB ---
 def load_user_session(user_id):
-    try:
-        res = sessions_col.find_one({"user_id": str(user_id)})
-        if res and "session_string" in res:
-            return res["session_string"]
-    except Exception as e:
-        print(f"❌ load_user_session Error: {e}")
-    return None
+    sessions = load_json(SESSIONS_FILE, {})
+    return sessions.get(str(user_id))
 
 def save_user_session(user_id, string_session):
-    try:
-        sessions_col.update_one(
-            {"user_id": str(user_id)}, 
-            {"$set": {"session_string": string_session}}, 
-            upsert=True
-        )
-    except Exception as e:
-        print(f"❌ save_user_session Error: {e}")
+    sessions = load_json(SESSIONS_FILE, {})
+    sessions[str(user_id)] = string_session
+    save_json(SESSIONS_FILE, sessions)
+
+def delete_user_session(user_id):
+    sessions = load_json(SESSIONS_FILE, {})
+    if str(user_id) in sessions:
+        del sessions[str(user_id)]
+        save_json(SESSIONS_FILE, sessions)
 
 # --- 🔐 LICENSE LOGIC ---
 def generate_key(days=0, hours=0):
@@ -870,7 +856,7 @@ async def callback_handler(event):
         if client:
             try: await client.log_out()
             except: pass
-        sessions_col.delete_one({"user_id": uid})
+        delete_user_session(user_id)
         user_states[user_id] = 'WAITING_PHONE'
         await event.respond("✅ **Session Deleted!**\n\n📱 Kripya apna naya **Telegram Phone Number** bhejein:")
 
@@ -1462,7 +1448,7 @@ async def handle_text(event):
             else:
                 await event.respond(f"❌ Koi channel nahi mila '{text}' ke naam se. Aap chahe toh us channel ka koi message yahan **forward** bhi kar sakte hain!")
         except Exception as e:
-            print(f"❌ Search Error: {e}")
+            pass
         return
 
     # Standard Text Search for Destinations
@@ -1580,7 +1566,7 @@ async def handle_text(event):
             save_user_session(user_id, session_string)
             
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ Login Successful! (Session Saved to Cloud ☁️)", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ Login Successful! (Session Saved Locally 💾)", buttons=get_mode_buttons(user_id))
         except SessionPasswordNeededError:
             user_states[user_id] = {'state': 'WAITING_PASSWORD'}
             await event.reply("🔒 2-Step Verification Password bhejein:")
@@ -1597,12 +1583,12 @@ async def handle_text(event):
             save_user_session(user_id, session_string)
             
             user_states[user_id] = 'CHOOSE_MODE'
-            await event.reply("✅ Password Verified! (Session Saved to Cloud ☁️)", buttons=get_mode_buttons(user_id))
+            await event.reply("✅ Password Verified! (Session Saved Locally 💾)", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
             user_states[user_id] = None
 
-print("👑 Ultimate Master Bot V2 Initialized Successfully!")
+print("👑 Master Bot V2 Initialized Successfully (Local Storage Mode)!")
 master_bot.start(bot_token=BOT_TOKEN)
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
