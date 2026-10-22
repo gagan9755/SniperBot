@@ -176,9 +176,16 @@ def format_time_left(td):
     return f"{days} Days" if days > 0 else f"{hours} Hours"
 
 # --- 🧠 UI BUTTON HELPERS ---
+def get_official_btn_row():
+    link = license_db.get("settings", {}).get("official_channel", "")
+    if link: 
+        return [[Button.url("📢 Join Official Channel", url=link)]]
+    return None
+
 def get_official_btn_single():
     link = license_db.get("settings", {}).get("official_channel", "")
-    if link: return [Button.url("📢 Join Official Channel", url=link)]
+    if link: 
+        return [Button.url("📢 Join Official Channel", url=link)]
     return []
 
 def get_mode_buttons(user_id):
@@ -655,11 +662,19 @@ async def start_command(event):
             return
         else:
             user_states[user_id] = 'WAITING_KEY'
-            await event.reply("⚠️ **Aapki purani Key Expire ho chuki hai!**\n\nKripya apni **Nayi License Key (PIN)** yahan bhejein:", buttons=get_official_btn_row())
+            btn_row = get_official_btn_row()
+            await event.reply(
+                "⚠️ **Aapki purani Key Expire ho chuki hai!**\n\nKripya apni **Nayi License Key (PIN)** yahan bhejein:", 
+                buttons=btn_row if btn_row else None
+            )
             return
 
     user_states[user_id] = 'WAITING_KEY'
-    await event.reply("🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:", buttons=get_official_btn_row())
+    btn_row = get_official_btn_row()
+    await event.reply(
+        "🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:", 
+        buttons=btn_row if btn_row else None
+    )
 
 @master_bot.on(events.CallbackQuery)
 async def callback_handler(event):
