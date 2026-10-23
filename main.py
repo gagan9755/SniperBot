@@ -56,9 +56,8 @@ def save_json(filepath, data):
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=4)
     except Exception as e:
-        print(f"Error saving {filepath}: {e}")
+        pass
 
-# --- LICENSES DB ---
 def load_licenses():
     default = {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}}
     return load_json(LICENSES_FILE, default)
@@ -68,7 +67,6 @@ def save_licenses(data):
 
 license_db = load_licenses()
 
-# --- BOT DATA DB ---
 def load_bot_data():
     return load_json(BOT_DATA_FILE, {})
 
@@ -99,7 +97,6 @@ def init_user_db(user_id):
         }
         save_bot_data()
 
-# --- SESSIONS DB ---
 def load_user_session(user_id):
     sessions = load_json(SESSIONS_FILE, {})
     return sessions.get(str(user_id))
@@ -239,6 +236,46 @@ def safe_replace_username(text, new_username):
     for i, block in enumerate(code_blocks):
         protected_text = protected_text.replace(f"__CODE_BLOCK_{i}__", block)
     return protected_text
+
+# --- 🔄 MENU ROUTING HELPERS ---
+async def send_format_menu(event, uid):
+    header = bot_db[uid].get('custom_header')
+    footer = bot_db[uid].get('custom_footer')
+    over_text = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
+    mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
+    lines_cache = bot_db[uid].get('setup_lines_cache', 4)
+
+    msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\n"
+    msg += f"🔝 **Header:** `{header}`\n" if header else "🔝 **Header:** ❌ Not Set\n"
+    msg += f"🔚 **Footer:** `{footer}`\n" if footer else "🔚 **Footer:** ❌ Not Set\n"
+    msg += f"⏰ **Over Text:** `{over_text}`\n\n"
+    
+    btns = [
+        [Button.inline("🔝 Set Header", b"ask_header"), Button.inline("🗑️ Remove Header", b"rem_header")],
+        [Button.inline("🔚 Set Footer", b"ask_footer"), Button.inline("🗑️ Remove Footer", b"rem_footer")],
+        [Button.inline("✏️ Set Custom Over Text", b"ask_over_text")],
+        [Button.inline("🚀 Start Bot", f"run_{mode_cache}_{lines_cache}".encode())],
+        [Button.inline("🔙 Cancel", b"select_fwd_mode")]
+    ]
+    await event.respond(msg, buttons=btns)
+
+async def send_god_mode_menu(event, uid):
+    link = bot_db[uid].get('replacer_link')
+    uname = bot_db[uid].get('replacer_username')
+    
+    msg = "⚡ **GOD MODE V2 Replacer Setup:**\n\n"
+    msg += "Kya aap chahte hain ki original message ke @usernames ya links ko aapke custom links se replace kiya jaye?\n"
+    msg += "*(Note: Replace karne par Premium Emojis HTML mein convert ho jate hain)*\n\n"
+    msg += f"🔗 **Current Link:** `{link}`\n" if link else "🔗 **Current Link:** ❌ Not Set\n"
+    msg += f"👤 **Current @User:** `{uname}`\n" if uname else "👤 **Current @User:** ❌ Not Set\n\n"
+    
+    btns = [
+        [Button.inline("🔗 Set Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
+        [Button.inline("👤 Set @Username", b"ask_replacer_username"), Button.inline("🗑️ Remove User", b"rem_replacer_username")],
+        [Button.inline("🚀 Start GOD MODE V2", b"run_god_0")],
+        [Button.inline("🔙 Cancel Setup", b"mode_god_start")]
+    ]
+    await event.respond(msg, buttons=btns)
 
 # --- 🎯 CORE ENGINE CLASS ---
 class UserSniper:
@@ -1117,40 +1154,22 @@ async def callback_handler(event):
         timer_val = int(data.split("_")[1])
         bot_db[uid]['over_timer'] = timer_val
         save_bot_data()
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+        await send_format_menu(event, uid)
 
     elif data == "show_format_menu":
-        header = bot_db[uid].get('custom_header')
-        footer = bot_db[uid].get('custom_footer')
-        over_text = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
-        mode_cache = bot_db[uid].get('setup_mode_cache', 'normal')
-        lines_cache = bot_db[uid].get('setup_lines_cache', 4)
-
-        msg = f"📝 **{mode_cache.capitalize()} Mode Setup:**\n\n"
-        msg += f"🔝 **Header:** `{header}`\n" if header else "🔝 **Header:** ❌ Not Set\n"
-        msg += f"🔚 **Footer:** `{footer}`\n" if footer else "🔚 **Footer:** ❌ Not Set\n"
-        msg += f"⏰ **Over Text:** `{over_text}`\n\n"
-        
-        btns = [
-            [Button.inline("🔝 Set Header", b"ask_header"), Button.inline("🗑️ Remove Header", b"rem_header")],
-            [Button.inline("🔚 Set Footer", b"ask_footer"), Button.inline("🗑️ Remove Footer", b"rem_footer")],
-            [Button.inline("✏️ Set Custom Over Text", b"ask_over_text")],
-            [Button.inline("🚀 Start Bot", f"run_{mode_cache}_{lines_cache}".encode())],
-            [Button.inline("🔙 Cancel", b"select_fwd_mode")]
-        ]
-        await event.respond(msg, buttons=btns)
+        await send_format_menu(event, uid)
 
     elif data == "rem_header":
         bot_db[uid]['custom_header'] = None
         save_bot_data()
         await event.answer("Header Removed!", alert=True)
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+        await send_format_menu(event, uid)
         
     elif data == "rem_footer":
         bot_db[uid]['custom_footer'] = None
         save_bot_data()
         await event.answer("Footer Removed!", alert=True)
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+        await send_format_menu(event, uid)
 
     elif data == "ask_header":
         prompt_msg = await event.respond("🔝 **Send Custom Header:**", buttons=[[Button.inline("🔙 Cancel", b"show_format_menu")]])
@@ -1165,34 +1184,19 @@ async def callback_handler(event):
         user_states[user_id] = {'state': 'WAITING_OVER_TEXT', 'prompt_id': prompt_msg.id}
 
     elif data == "setup_god_mode":
-        link = bot_db[uid].get('replacer_link')
-        uname = bot_db[uid].get('replacer_username')
-        
-        msg = "⚡ **GOD MODE V2 Replacer Setup:**\n\n"
-        msg += "Kya aap chahte hain ki original message ke @usernames ya links ko aapke custom links se replace kiya jaye?\n"
-        msg += "*(Note: Replace karne par Premium Emojis HTML mein convert ho jate hain)*\n\n"
-        msg += f"🔗 **Current Link:** `{link}`\n" if link else "🔗 **Current Link:** ❌ Not Set\n"
-        msg += f"👤 **Current @User:** `{uname}`\n" if uname else "👤 **Current @User:** ❌ Not Set\n\n"
-        
-        btns = [
-            [Button.inline("🔗 Set Link", b"ask_replacer_link"), Button.inline("🗑️ Remove Link", b"rem_replacer_link")],
-            [Button.inline("👤 Set @Username", b"ask_replacer_username"), Button.inline("🗑️ Remove User", b"rem_replacer_username")],
-            [Button.inline("🚀 Start GOD MODE V2", b"run_god_0")],
-            [Button.inline("🔙 Cancel Setup", b"mode_god_start")]
-        ]
-        await event.respond(msg, buttons=btns)
+        await send_god_mode_menu(event, uid)
 
     elif data == "rem_replacer_link":
         bot_db[uid]['replacer_link'] = None
         save_bot_data()
         await event.answer("Link Removed!", alert=True)
-        await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
+        await send_god_mode_menu(event, uid)
 
     elif data == "rem_replacer_username":
         bot_db[uid]['replacer_username'] = None
         save_bot_data()
         await event.answer("Username Removed!", alert=True)
-        await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
+        await send_god_mode_menu(event, uid)
 
     elif data == "ask_replacer_link":
         prompt_msg = await event.respond("🔗 **Send Custom Link:**", buttons=[[Button.inline("🔙 Cancel", b"setup_god_mode")]])
@@ -1329,7 +1333,6 @@ async def handle_text(event):
         await event.respond(f"✅ **Preset '{pname}' Saved!**", buttons=[[Button.inline("📂 View Presets", b"list_presets"), Button.inline("🔙 Back", b"back_to_mode")]])
         return
 
-    # 🚀 ADVANCED FORWARDED MESSAGE & SMART SEARCH DETECTOR FOR SOURCES
     if isinstance(state, dict) and state.get('state') in ['SELECT_SOURCES', 'SELECT_SOURCES_SP']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
@@ -1358,7 +1361,7 @@ async def handle_text(event):
                     resolved = await client.get_entity(fwd.saved_from_peer)
                     forwarded_chat_id = resolved.id
                     forwarded_chat_title = getattr(resolved, 'title', 'Source Channel')
-            except: pass
+            except Exception: pass
 
         if not forwarded_chat_id and hasattr(event.message, 'fwd_from') and event.message.fwd_from:
             try:
@@ -1367,7 +1370,7 @@ async def handle_text(event):
                     resolved = await client.get_entity(fwd_from.from_id)
                     forwarded_chat_id = resolved.id
                     forwarded_chat_title = getattr(resolved, 'title', 'Source Channel')
-            except: pass
+            except Exception: pass
 
         if forwarded_chat_id:
             if not str(forwarded_chat_id).startswith("-100") and abs(forwarded_chat_id) < 1000000000000:
@@ -1425,7 +1428,6 @@ async def handle_text(event):
             pass
         return
 
-    # Standard Text Search for Destinations
     if isinstance(state, dict) and state.get('state') in ['SELECT_DEST', 'SELECT_DEST_CUSTOM', 'SELECT_DEST_SP']:
         client = user_data.get(user_id, {}).get('client')
         if not client: return
@@ -1473,7 +1475,7 @@ async def handle_text(event):
         except: pass
         user_states[user_id] = None
         
-        await callback_handler(events.CallbackQuery.Event(data=b"show_format_menu", sender_id=user_id))
+        await send_format_menu(event, uid)
         return
 
     if isinstance(state, dict) and state.get('state') in ['WAITING_CLONE_LINK', 'WAITING_CLONE_USERNAME']:
@@ -1486,7 +1488,7 @@ async def handle_text(event):
         try: await master_bot.delete_messages(user_id, [state.get('prompt_id'), event.id])
         except: pass
         user_states[user_id] = None
-        await callback_handler(events.CallbackQuery.Event(data=b"setup_god_mode", sender_id=user_id))
+        await send_god_mode_menu(event, uid)
         return
 
     if state == 'WAITING_KEY':
@@ -1499,37 +1501,34 @@ async def handle_text(event):
             license_db["users"][str(user_id)] = {"name": event.sender.first_name, "key": text, "expires": k_info["expires"]}
             save_licenses(license_db)
             
-            session_str = load_user_session(user_id)
-            client = user_data.get(user_id, {}).get('client')
-            if not client:
-                client = TelegramClient(StringSession(session_str) if session_str else f'session_{user_id}', API_ID, API_HASH)
-                await client.connect()
-                
-            if await client.is_user_authorized():
-                if user_id not in user_data: user_data[user_id] = {}
-                user_data[user_id]['client'] = client
-                user_states[user_id] = 'CHOOSE_MODE'
-                await event.reply("✅ **Key Verified!**", buttons=get_mode_buttons(user_id))
-            else:
-                if user_id not in user_data: user_data[user_id] = {}
-                user_data[user_id]['client'] = client
-                user_states[user_id] = 'WAITING_PHONE'
-                await event.reply("✅ **Key Verified!**\n📱 Apna **Telegram Phone Number** bhejein:")
+            client = TelegramClient(StringSession(), API_ID, API_HASH)
+            await client.connect()
+            if user_id not in user_data: user_data[user_id] = {}
+            user_data[user_id]['client'] = client
+            user_states[user_id] = 'WAITING_PHONE'
+            await event.reply("✅ **Key Verified!**\n\n📱 Apna **Telegram Phone Number** bhejein (jaise +91...):")
         else: await event.reply("❌ **Invalid Key!**")
 
-    elif state in ['WAITING_PHONE']:
+    elif state == 'WAITING_PHONE':
         user_states[user_id] = {'state': 'WAITING_OTP', 'phone': text}
         await event.reply("🔄 OTP bhej rahe hain...")
         try:
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
+            client = TelegramClient(
+                StringSession(), 
+                API_ID, 
+                API_HASH,
+                device_model="iPhone 14 Pro Max",
+                system_version="iOS 16.5",
+                app_version="10.1.1"
+            )
             await client.connect()
             sent = await client.send_code_request(text)
             if user_id not in user_data: user_data[user_id] = {}
             user_data[user_id].update({'client': client, 'phone_code_hash': sent.phone_code_hash})
             await event.reply("✅ OTP aapke Telegram app par bhej diya gaya hai!\n\nKripya apna OTP yahan type karein:")
         except Exception as e:
-            await event.reply(f"❌ Error: {e}")
-            user_states[user_id] = None
+            await event.reply(f"❌ Error: {e}\n\nKripya apna number sahi format mein bhejein (jaise +91...).")
+            user_states[user_id] = 'WAITING_PHONE'
 
     elif isinstance(state, dict) and state.get('state') == 'WAITING_OTP':
         try:
@@ -1545,8 +1544,7 @@ async def handle_text(event):
             user_states[user_id] = {'state': 'WAITING_PASSWORD'}
             await event.reply("🔒 2-Step Verification Password bhejein:")
         except Exception as e:
-            await event.reply(f"❌ OTP Error: {e}")
-            user_states[user_id] = None
+            await event.reply(f"❌ OTP Error: {e}\nSahi OTP dobara type karein:")
 
     elif isinstance(state, dict) and state.get('state') == 'WAITING_PASSWORD':
         try:
@@ -1560,7 +1558,6 @@ async def handle_text(event):
             await event.reply("✅ Password Verified! (Session Saved Locally 💾)", buttons=get_mode_buttons(user_id))
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
-            user_states[user_id] = None
 
 print("👑 Ultimate Master Bot V2 Initialized Successfully (Local Storage Mode)!")
 master_bot.start(bot_token=BOT_TOKEN)
