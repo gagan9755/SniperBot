@@ -1,4 +1,4 @@
-import asyncio
+import asynci
 import time
 import re
 from collections import deque
