@@ -27,7 +27,7 @@ Thread(target=run_server).start()
 # --- ⚙️ MASTER CONFIGURATION ---
 API_ID = 21601452
 API_HASH = 'cc8257993f2553fec9f43bcd6b8f79c4'
-BOT_TOKEN = '8546884710:AAEidgEI9Xdu8GpxbEKEXQE9tyo6mupJEuY' 
+BOT_TOKEN = '8546884710:AAE8wswEhlG9vadlf22e-X41G1yw6M5iEfM' 
 
 MASTER_ID = 8845438009  # Your Admin ID
 
