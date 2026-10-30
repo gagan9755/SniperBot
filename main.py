@@ -277,6 +277,13 @@ async def send_god_mode_menu(event, uid):
     ]
     await event.respond(msg, buttons=btns)
 
+# --- ⚡ ULTRA-FAST RUSH MODE EXECUTOR (NO JSON WAIT) ---
+async def fast_send_rush(client, target, text):
+    try:
+        await client.send_message(target, text, parse_mode='md', link_preview=False)
+    except Exception:
+        pass
+
 # --- 🎯 CORE ENGINE CLASS ---
 class UserSniper:
     def __init__(self, user_id, client, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
@@ -298,6 +305,10 @@ class UserSniper:
         
         self.god_msg_map = {}
         self.god_msg_keys = deque(maxlen=2000)
+        
+        # --- NEW RAM-ONLY STORAGE FOR RUSH MODE ---
+        self.rush_processed_ids = deque(maxlen=300)
+        self.rush_seen_codes = deque(maxlen=300)
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -321,6 +332,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
     sniper = UserSniper(user_id, client, name, source_chat_ids, sniper_mode, lines_count)
     
+    # 🎯 TARGET CACHING IN RAM FOR ALL MODES
     for d_chat in dest_chats:
         try:
             target_entity = await client.get_entity(int(d_chat))
@@ -343,6 +355,40 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         except: pass
         try: client.remove_event_handler(delete_handler)
         except: pass
+
+    # --- ⚡ NEW ULTRA-FAST RUSH MODE ENGINE ---
+    async def process_rush_mode(event):
+        if event.id in sniper.rush_processed_ids: return
+        
+        extracted_codes = []
+        for ent, text in event.message.get_entities_text():
+            if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                # Ignore private invite links mistakenly tagged as code
+                if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', text, re.IGNORECASE): 
+                    continue
+                if text not in sniper.rush_seen_codes:
+                    extracted_codes.append(text)
+                    sniper.rush_seen_codes.append(text)
+                    
+        if not extracted_codes: return
+        
+        # Add to processed
+        sniper.rush_processed_ids.append(event.id)
+        
+        num = len(extracted_codes)
+        lines = [f"{num} Code"]
+        if num == 1:
+            lines.extend([f"`{extracted_codes[0]}`"] * 3)
+        elif num == 2:
+            for c in extracted_codes: lines.extend([f"`{c}`", f"`{c}`"])
+        else:
+            for c in extracted_codes: lines.append(f"`{c}`")
+            
+        final_msg = "\n".join(lines)
+        
+        # 🚀 ASYNC TASK DIRECT FIRE (ZERO WAIT, ZERO JSON SAVING)
+        for target in sniper.destinations.values():
+            asyncio.create_task(fast_send_rush(client, target, final_msg))
 
     async def process_fast_event(event, is_edit=False):
         if is_edit and event.id in sniper.processed_ids_set: 
@@ -405,17 +451,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
         messages_to_send = []
         
-        if sniper.sniper_mode == "rush":
-            num = len(final_codes)
-            lines = [f"{num} Code"]
-            if num == 1: lines.extend([f"`{final_codes[0]}`"] * 3)
-            elif num == 2:
-                for c in final_codes: lines.extend([f"`{c}`", f"`{c}`"])
-            else:
-                for c in final_codes: lines.append(f"`{c}`")
-            messages_to_send.append({'text': "\n".join(lines)})
-            
-        elif sniper.sniper_mode == "special":
+        if sniper.sniper_mode == "special":
             c = final_codes[0]
             body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
             messages_to_send.append({'text': body_text, 'is_special': True})
@@ -430,17 +466,17 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
                 messages_to_send.append({'text': final_text})
 
-        async def fast_send_dest(target):
+        async def send_dest(target):
             for item in messages_to_send:
                 try:
                     sent_msg = await client.send_message(target, item['text'], parse_mode='md', link_preview=False)
                     timer_sec = bot_db[uid].get('over_timer', 0)
-                    if timer_sec > 0 and sniper.sniper_mode != 'rush' and not item.get('is_special'):
+                    if timer_sec > 0 and not item.get('is_special'):
                         custom_over = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
                         asyncio.create_task(auto_over_message(client, target, sent_msg.id, timer_sec, custom_over))
                 except: pass
 
-        tasks = [fast_send_dest(target) for target in sniper.destinations.values()]
+        tasks = [send_dest(target) for target in sniper.destinations.values()]
         await asyncio.gather(*tasks)
         
         bot_db[uid]['stats']['forwarded'] += 1
@@ -525,7 +561,10 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         else:
             if event.chat_id not in sniper.pinned_chats: return
 
-        if sniper.sniper_mode == 'god':
+        # ⚡ ROUTING TO RUSH OR OTHER MODES
+        if sniper.sniper_mode == 'rush':
+            await process_rush_mode(event)
+        elif sniper.sniper_mode == 'god':
             await process_god_mode(event)
         else:
             await process_fast_event(event, is_edit=False)
@@ -533,6 +572,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
     @client.on(events.MessageEdited())
     async def edit_handler(event):
         if not sniper.is_running or sniper.is_paused: return
+        if sniper.sniper_mode == 'rush': return # Rush mode me edit catch karne ka load hata diya
         
         if sniper.source_chat_ids:
             if event.chat_id not in sniper.source_chat_ids: return
@@ -1114,7 +1154,7 @@ async def callback_handler(event):
         await event.respond(
             "🛠 **Sniper Forwarding Mode:**",
             buttons=[
-                [Button.inline("🚀 Start Rush Mode", b"run_rush_0")], 
+                [Button.inline("🚀 Start Rush Mode (Ultra Fast)", b"run_rush_0")], 
                 [Button.inline("🟢 Normal Mode", b"ask_lines_normal")],
                 [Button.inline("🔗 Link Forwarder", b"ask_lines_link")],
                 [Button.inline("🔙 Back", b"back_to_mode")]
