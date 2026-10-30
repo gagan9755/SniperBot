@@ -307,8 +307,8 @@ class UserSniper:
         self.god_msg_keys = deque(maxlen=2000)
         
         # --- NEW RAM-ONLY STORAGE FOR RUSH MODE ---
-        self.rush_processed_ids = deque(maxlen=300)
-        self.rush_seen_codes = deque(maxlen=300)
+        self.rush_processed_ids = deque(maxlen=500)
+        self.rush_seen_codes = deque(maxlen=500)
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -356,24 +356,40 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         try: client.remove_event_handler(delete_handler)
         except: pass
 
-    # --- ⚡ NEW ULTRA-FAST RUSH MODE ENGINE ---
-    async def process_rush_mode(event):
-        if event.id in sniper.rush_processed_ids: return
+    # --- ⚡ NEW ULTRA-FAST RUSH MODE ENGINE (With Optional Catchers) ---
+    async def process_rush_mode(event, is_edit=False):
+        if not is_edit and event.id in sniper.rush_processed_ids: return
         
+        text_content = event.message.message or ""
         extracted_codes = []
+        
+        # Extract direct mono codes
         for ent, text in event.message.get_entities_text():
             if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                # Ignore private invite links mistakenly tagged as code
                 if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', text, re.IGNORECASE): 
                     continue
                 if text not in sniper.rush_seen_codes:
                     extracted_codes.append(text)
-                    sniper.rush_seen_codes.append(text)
                     
+        # 🔗 Optional Deep Link Catcher (RAM Checked - Zero Delay if OFF)
+        if bot_db[uid].get('link_catcher'):
+            link_pattern = r'(?:https?://)?(?:t\.me|telegram\.me)/(?:c/(\d+)/(\d+)|([a-zA-Z0-9_]+)/(\d+))'
+            for match in re.finditer(link_pattern, text_content):
+                try:
+                    c_id = int("-100" + match.group(1)) if match.group(1) else match.group(3)
+                    m_id = int(match.group(2) if match.group(1) else match.group(4))
+                    f_msg = await client.get_messages(c_id, ids=m_id)
+                    if f_msg:
+                        for ent, text in f_msg.get_entities_text():
+                            if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                                if text not in sniper.rush_seen_codes and text not in extracted_codes:
+                                    extracted_codes.append(text)
+                except: pass
+
         if not extracted_codes: return
         
-        # Add to processed
-        sniper.rush_processed_ids.append(event.id)
+        if not is_edit: sniper.rush_processed_ids.append(event.id)
+        for c in extracted_codes: sniper.rush_seen_codes.append(c)
         
         num = len(extracted_codes)
         lines = [f"{num} Code"]
@@ -563,7 +579,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
         # ⚡ ROUTING TO RUSH OR OTHER MODES
         if sniper.sniper_mode == 'rush':
-            await process_rush_mode(event)
+            await process_rush_mode(event, is_edit=False)
         elif sniper.sniper_mode == 'god':
             await process_god_mode(event)
         else:
@@ -572,12 +588,17 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
     @client.on(events.MessageEdited())
     async def edit_handler(event):
         if not sniper.is_running or sniper.is_paused: return
-        if sniper.sniper_mode == 'rush': return # Rush mode me edit catch karne ka load hata diya
         
         if sniper.source_chat_ids:
             if event.chat_id not in sniper.source_chat_ids: return
         else:
             if event.chat_id not in sniper.pinned_chats: return
+
+        # ⚡ RUSH MODE EDIT CATCHER ⚡
+        if sniper.sniper_mode == 'rush':
+            if bot_db[uid].get('edit_catcher'):
+                await process_rush_mode(event, is_edit=True)
+            return
 
         if sniper.sniper_mode == 'god':
             if event.id not in sniper.god_msg_map: return
