@@ -19,7 +19,7 @@ import os
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "🤖 Master Sniper Bot is SECURE and RUNNING 24/7 (Local Storage Mode)!"
+    return "🤖 Ultimate Sniper Engine is SECURE and RUNNING 24/7 at ZERO LATENCY!"
 def run_server():
     app.run(host='0.0.0.0', port=8080)
 Thread(target=run_server).start()
@@ -37,7 +37,7 @@ user_states = {}
 user_data = {}  
 active_snipers_dict = {}
 
-# --- 📁 LOCAL JSON DATABASE SYSTEM (No MongoDB) ---
+# --- 📁 LOCAL JSON DATABASE SYSTEM (For Configuration ONLY, Not Live Stats) ---
 LICENSES_FILE = "licenses.json"
 BOT_DATA_FILE = "bot_data.json"
 SESSIONS_FILE = "sessions.json"
@@ -45,35 +45,26 @@ SESSIONS_FILE = "sessions.json"
 def load_json(filepath, default_data):
     if os.path.exists(filepath):
         try:
-            with open(filepath, 'r') as f:
-                return json.load(f)
-        except Exception:
-            return default_data
+            with open(filepath, 'r') as f: return json.load(f)
+        except Exception: return default_data
     return default_data
 
 def save_json(filepath, data):
     try:
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=4)
-    except Exception as e:
-        pass
+        with open(filepath, 'w') as f: json.dump(data, f, indent=4)
+    except Exception: pass
 
 def load_licenses():
-    default = {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}}
-    return load_json(LICENSES_FILE, default)
+    return load_json(LICENSES_FILE, {"keys": {}, "users": {}, "special_keys": {}, "special_users": {}, "settings": {"official_channel": ""}})
 
 def save_licenses(data):
     save_json(LICENSES_FILE, data)
 
 license_db = load_licenses()
-
-def load_bot_data():
-    return load_json(BOT_DATA_FILE, {})
+bot_db = load_json(BOT_DATA_FILE, {})
 
 def save_bot_data():
     save_json(BOT_DATA_FILE, bot_db)
-
-bot_db = load_bot_data()
 
 def init_user_db(user_id):
     uid = str(user_id)
@@ -83,23 +74,16 @@ def init_user_db(user_id):
             'sniper_mode': 'rush', 'lines_count': 4,
             'is_running': False, 'is_paused': False, 
             'edit_catcher': False, 'link_catcher': False,
-            'replacer_link': None, 
-            'replacer_username': None, 
-            'custom_header': None, 
-            'custom_footer': None, 
-            'over_timer': 0, 
-            'over_text': "❌️❌️ OVER ❌️❌️",
-            'presets': {},
-            'setup_type': 'normal', 
-            'setup_mode_cache': 'normal',
-            'setup_lines_cache': 4,
-            'stats': {'forwarded': 0}
+            'replacer_link': None, 'replacer_username': None, 
+            'custom_header': None, 'custom_footer': None, 
+            'over_timer': 0, 'over_text': "❌️❌️ OVER ❌️❌️",
+            'presets': {}, 'setup_type': 'normal', 
+            'setup_mode_cache': 'normal', 'setup_lines_cache': 4
         }
         save_bot_data()
 
 def load_user_session(user_id):
-    sessions = load_json(SESSIONS_FILE, {})
-    return sessions.get(str(user_id))
+    return load_json(SESSIONS_FILE, {}).get(str(user_id))
 
 def save_user_session(user_id, string_session):
     sessions = load_json(SESSIONS_FILE, {})
@@ -132,25 +116,19 @@ def is_user_authorized(user_id):
 
 def check_subscription(user_id):
     if not is_user_authorized(user_id): return False
-    expires_str = license_db["users"][str(user_id)]["expires"]
-    return datetime.now() < datetime.fromisoformat(expires_str)
+    return datetime.now() < datetime.fromisoformat(license_db["users"][str(user_id)]["expires"])
 
 def is_special_authorized(user_id):
-    uid = str(user_id)
-    if uid not in license_db["special_users"]: return False
-    expires_str = license_db["special_users"][uid]["expires"]
-    return datetime.now() < datetime.fromisoformat(expires_str)
+    if str(user_id) not in license_db["special_users"]: return False
+    return datetime.now() < datetime.fromisoformat(license_db["special_users"][str(user_id)]["expires"])
 
 def get_time_left(user_id):
     if not is_user_authorized(user_id): return None
-    expires_str = license_db["users"][str(user_id)]["expires"]
-    return datetime.fromisoformat(expires_str) - datetime.now()
+    return datetime.fromisoformat(license_db["users"][str(user_id)]["expires"]) - datetime.now()
 
 def get_special_time_left(user_id):
-    uid = str(user_id)
-    if uid not in license_db["special_users"]: return None
-    expires_str = license_db["special_users"][uid]["expires"]
-    return datetime.fromisoformat(expires_str) - datetime.now()
+    if str(user_id) not in license_db["special_users"]: return None
+    return datetime.fromisoformat(license_db["special_users"][str(user_id)]["expires"]) - datetime.now()
 
 def format_time_left(td):
     if not td or int(td.total_seconds()) <= 0: return "Expired"
@@ -158,17 +136,9 @@ def format_time_left(td):
     return f"{days} Days" if days > 0 else f"{hours} Hours"
 
 # --- 🧠 UI BUTTON HELPERS ---
-def get_official_btn_row():
-    link = license_db.get("settings", {}).get("official_channel", "")
-    if link: 
-        return [[Button.url("📢 Join Official Channel", url=link)]]
-    return None
-
 def get_official_btn_single():
     link = license_db.get("settings", {}).get("official_channel", "")
-    if link: 
-        return [Button.url("📢 Join Official Channel", url=link)]
-    return []
+    return [Button.url("📢 Join Official Channel", url=link)] if link else []
 
 def get_mode_buttons(user_id):
     btns = [
@@ -192,8 +162,7 @@ def get_control_buttons(validity_str, uid):
         [Button.inline(f"👁️ Smart Edit Catcher: {edit_status}", b"toggle_edit_catcher")],
         [Button.inline(f"🔗 Deep Link Catcher: {link_status}", b"toggle_link_catcher")],
         [Button.inline("💾 Save Current Setup", b"save_current_preset"), Button.inline("📂 Load Preset", b"list_presets")],
-        [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")],
-        [Button.inline("📊 My Stats", b"ctl_stats")]
+        [Button.inline(f"⏳ Expiry: {validity_str}", b"ctl_mykey"), Button.inline("🔄 Restart Setup", b"ctl_restart")]
     ]
     off_btn = get_official_btn_single()
     if off_btn: btns.append(off_btn)
@@ -264,8 +233,6 @@ async def send_god_mode_menu(event, uid):
     uname = bot_db[uid].get('replacer_username')
     
     msg = "⚡ **GOD MODE V2 Replacer Setup:**\n\n"
-    msg += "Kya aap chahte hain ki original message ke @usernames ya links ko aapke custom links se replace kiya jaye?\n"
-    msg += "*(Note: Replace karne par Premium Emojis HTML mein convert ho jate hain)*\n\n"
     msg += f"🔗 **Current Link:** `{link}`\n" if link else "🔗 **Current Link:** ❌ Not Set\n"
     msg += f"👤 **Current @User:** `{uname}`\n" if uname else "👤 **Current @User:** ❌ Not Set\n\n"
     
@@ -277,14 +244,28 @@ async def send_god_mode_menu(event, uid):
     ]
     await event.respond(msg, buttons=btns)
 
-# --- ⚡ ULTRA-FAST RUSH MODE EXECUTOR (NO JSON WAIT) ---
-async def fast_send_rush(client, target, text):
+# --- ⚡ ZERO-LATENCY ASYNC TASK EXECUTOR (ALL MODES) ---
+async def fast_send_all_modes(client, target, text, timer_sec=0, custom_over=""):
     try:
-        await client.send_message(target, text, parse_mode='md', link_preview=False)
-    except Exception:
-        pass
+        sent_msg = await client.send_message(target, text, parse_mode='md', link_preview=False)
+        # Direct Timer Handle without blocking event loop
+        if timer_sec > 0 and sent_msg:
+            await asyncio.sleep(timer_sec)
+            try: await client.edit_message(target, sent_msg.id, custom_over)
+            except: pass
+    except: pass
 
-# --- 🎯 CORE ENGINE CLASS ---
+async def fast_god_send(client, target, text_content, kwargs, timer_sec=0, custom_over=""):
+    try:
+        sent_msg = await client.send_message(target, text_content, **kwargs)
+        if timer_sec > 0 and sent_msg:
+            await asyncio.sleep(timer_sec)
+            try: await client.edit_message(target, sent_msg.id, custom_over)
+            except: pass
+        return sent_msg.id if sent_msg else None
+    except: return None
+
+# --- 🎯 CORE ENGINE CLASS (RAM FOCUSED) ---
 class UserSniper:
     def __init__(self, user_id, client, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
         self.user_id = user_id
@@ -298,17 +279,13 @@ class UserSniper:
         self.sniper_mode = sniper_mode 
         self.lines_count = lines_count
         
-        self.processed_ids_set = set()
-        self.seen_codes_set = set()
-        self.seen_codes_queue = deque(maxlen=200)
+        # 🧠 RAM BASED DEQUES FOR ALL MODES
+        self.processed_ids = deque(maxlen=2000)
+        self.seen_codes = deque(maxlen=2000)
         self.special_triggered = False 
         
         self.god_msg_map = {}
         self.god_msg_keys = deque(maxlen=2000)
-        
-        # --- NEW RAM-ONLY STORAGE FOR RUSH MODE ---
-        self.rush_processed_ids = deque(maxlen=500)
-        self.rush_seen_codes = deque(maxlen=500)
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -332,7 +309,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
     sniper = UserSniper(user_id, client, name, source_chat_ids, sniper_mode, lines_count)
     
-    # 🎯 TARGET CACHING IN RAM FOR ALL MODES
+    # 🎯 RAM CACHING DESTINATIONS (NO ID FETCH LATENCY)
     for d_chat in dest_chats:
         try:
             target_entity = await client.get_entity(int(d_chat))
@@ -342,7 +319,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
     if not sniper.destinations:
         bot_db[uid]['is_running'] = False
         save_bot_data()
-        await master_bot.send_message(user_id, f"❌ Error: Koi bhi valid destination channel nahi mila.")
+        await master_bot.send_message(user_id, f"❌ Error: Koi valid destination nahi mila.")
         return
 
     active_snipers_dict[user_id] = sniper
@@ -356,22 +333,38 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         try: client.remove_event_handler(delete_handler)
         except: pass
 
-    # --- ⚡ NEW ULTRA-FAST RUSH MODE ENGINE (With Optional Catchers) ---
-    async def process_rush_mode(event, is_edit=False):
-        if not is_edit and event.id in sniper.rush_processed_ids: return
-        
+    # --- ⚡ 1. FAST EVENT PROCESSOR (NORMAL, LINK, SPECIAL, RUSH) ---
+    async def process_fast_event(event, is_edit=False):
+        if event.id in sniper.processed_ids: return 
+            
+        if sniper.sniper_mode == "special":
+            if not is_special_authorized(user_id):
+                sniper.is_running = False
+                bot_db[uid]['is_running'] = False
+                save_bot_data()
+                if user_id in active_snipers_dict: del active_snipers_dict[user_id]
+                try: await master_bot.send_message(user_id, "⚠️ **Aapki Special Key expire ho chuki hai!** Bot stopped.")
+                except: pass
+                return
+            if sniper.special_triggered: return
+
         text_content = event.message.message or ""
         extracted_codes = []
-        
-        # Extract direct mono codes
-        for ent, text in event.message.get_entities_text():
-            if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', text, re.IGNORECASE): 
-                    continue
-                if text not in sniper.rush_seen_codes:
-                    extracted_codes.append(text)
-                    
-        # 🔗 Optional Deep Link Catcher (RAM Checked - Zero Delay if OFF)
+
+        # 🧠 Fast Extraction Logic
+        if sniper.sniper_mode == "link":
+            found = re.findall(r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?(?:#[^\s]*)?', text_content)
+            for ent, t in event.message.get_entities_text():
+                if isinstance(ent, (types.MessageEntityUrl, types.MessageEntityTextUrl)) and t not in found:
+                    found.append(t)
+            extracted_codes.extend(found)
+        else:
+            for ent, text in event.message.get_entities_text():
+                if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                    if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', text, re.IGNORECASE): continue
+                    if text not in extracted_codes: extracted_codes.append(text)
+
+        # 🔗 RAM Based Deep Link Catcher
         if bot_db[uid].get('link_catcher'):
             link_pattern = r'(?:https?://)?(?:t\.me|telegram\.me)/(?:c/(\d+)/(\d+)|([a-zA-Z0-9_]+)/(\d+))'
             for match in re.finditer(link_pattern, text_content):
@@ -380,96 +373,30 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     m_id = int(match.group(2) if match.group(1) else match.group(4))
                     f_msg = await client.get_messages(c_id, ids=m_id)
                     if f_msg:
-                        for ent, text in f_msg.get_entities_text():
-                            if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                                if text not in sniper.rush_seen_codes and text not in extracted_codes:
-                                    extracted_codes.append(text)
+                        for ent, t in f_msg.get_entities_text():
+                            if isinstance(ent, (MessageEntityCode, MessageEntityPre)) and t not in extracted_codes:
+                                extracted_codes.append(t)
                 except: pass
 
-        if not extracted_codes: return
-        
-        if not is_edit: sniper.rush_processed_ids.append(event.id)
-        for c in extracted_codes: sniper.rush_seen_codes.append(c)
-        
-        num = len(extracted_codes)
-        lines = [f"{num} Code"]
-        if num == 1:
-            lines.extend([f"`{extracted_codes[0]}`"] * 3)
-        elif num == 2:
-            for c in extracted_codes: lines.extend([f"`{c}`", f"`{c}`"])
-        else:
-            for c in extracted_codes: lines.append(f"`{c}`")
-            
-        final_msg = "\n".join(lines)
-        
-        # 🚀 ASYNC TASK DIRECT FIRE (ZERO WAIT, ZERO JSON SAVING)
-        for target in sniper.destinations.values():
-            asyncio.create_task(fast_send_rush(client, target, final_msg))
-
-    async def process_fast_event(event, is_edit=False):
-        if is_edit and event.id in sniper.processed_ids_set: 
-            return 
-            
-        if sniper.sniper_mode == "special":
-            if not is_special_authorized(user_id):
-                sniper.is_running = False
-                bot_db[uid]['is_running'] = False
-                save_bot_data()
-                if user_id in active_snipers_dict: del active_snipers_dict[user_id]
-                try: await master_bot.send_message(user_id, "⚠️ **Aapki Special Key expire ho chuki hai ya authorized nahi hai!**\nSpecial Code mode stop ho gaya hai.")
-                except: pass
-                return
-            if sniper.special_triggered: return
-
-        text_content = event.message.message or ""
-        extracted_items = []
-
-        def get_codes_from_msg(msg):
-            codes = []
-            if sniper.sniper_mode == "link":
-                txt = msg.message or ""
-                found = re.findall(r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?(?:#[^\s]*)?', txt)
-                for ent, t in msg.get_entities_text():
-                    if isinstance(ent, (types.MessageEntityUrl, types.MessageEntityTextUrl)) and t not in found:
-                        found.append(t)
-                codes = found
-            else:
-                for ent, ent_text in msg.get_entities_text():
-                    if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                        if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', ent_text, re.IGNORECASE): 
-                            continue
-                        if ent_text not in codes: codes.append(ent_text)
-            return codes
-
-        extracted_items.extend(get_codes_from_msg(event.message))
-
-        if bot_db[uid].get('link_catcher'):
-            link_pattern = r'(?:https?://)?(?:t\.me|telegram\.me)/(?:c/(\d+)/(\d+)|([a-zA-Z0-9_]+)/(\d+))'
-            for match in re.finditer(link_pattern, text_content):
-                try:
-                    c_id = int("-100" + match.group(1)) if match.group(1) else match.group(3)
-                    m_id = int(match.group(2) if match.group(1) else match.group(4))
-                    f_msg = await client.get_messages(c_id, ids=m_id)
-                    if f_msg: extracted_items.extend(get_codes_from_msg(f_msg))
-                except: pass
-
-        final_codes = []
-        for c in extracted_items:
-            if c not in sniper.seen_codes_set:
-                final_codes.append(c)
-
+        final_codes = [c for c in extracted_codes if c not in sniper.seen_codes]
         if not final_codes: return
         
-        sniper.processed_ids_set.add(event.id)
-        for c in final_codes:
-            sniper.seen_codes_queue.append(c)
-            sniper.seen_codes_set.add(c)
+        sniper.processed_ids.append(event.id)
+        for c in final_codes: sniper.seen_codes.append(c)
 
         messages_to_send = []
-        
-        if sniper.sniper_mode == "special":
-            c = final_codes[0]
-            body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
+        if sniper.sniper_mode == "rush":
+            num = len(final_codes)
+            lines = [f"{num} Code"]
+            if num == 1: lines.extend([f"`{final_codes[0]}`"] * 3)
+            elif num == 2:
+                for c in final_codes: lines.extend([f"`{c}`", f"`{c}`"])
+            else:
+                for c in final_codes: lines.append(f"`{c}`")
+            messages_to_send.append({'text': "\n".join(lines)})
+            
+        elif sniper.sniper_mode == "special":
+            body_text = "\n".join([f"`{final_codes[0]}`"] * sniper.lines_count)
             messages_to_send.append({'text': body_text, 'is_special': True})
             sniper.special_triggered = True
             
@@ -482,33 +409,27 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
                 messages_to_send.append({'text': final_text})
 
-        async def send_dest(target):
-            for item in messages_to_send:
-                try:
-                    sent_msg = await client.send_message(target, item['text'], parse_mode='md', link_preview=False)
-                    timer_sec = bot_db[uid].get('over_timer', 0)
-                    if timer_sec > 0 and not item.get('is_special'):
-                        custom_over = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
-                        asyncio.create_task(auto_over_message(client, target, sent_msg.id, timer_sec, custom_over))
-                except: pass
-
-        tasks = [send_dest(target) for target in sniper.destinations.values()]
-        await asyncio.gather(*tasks)
+        # 🚀 ASYNC FIRE (ZERO STATS WRITING DELAY)
+        timer_sec = bot_db[uid].get('over_timer', 0)
+        custom_over = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
         
-        bot_db[uid]['stats']['forwarded'] += 1
-        save_bot_data()
+        for target in sniper.destinations.values():
+            for item in messages_to_send:
+                use_timer = timer_sec if sniper.sniper_mode not in ['rush', 'special'] and not item.get('is_special') else 0
+                asyncio.create_task(fast_send_all_modes(client, target, item['text'], use_timer, custom_over))
 
         if sniper.sniper_mode == "special" and sniper.special_triggered:
             sniper.is_running = False
             bot_db[uid]['is_running'] = False
             save_bot_data()
             if user_id in active_snipers_dict: del active_snipers_dict[user_id]
-            try: await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!**\n\nBot automatically stop ho gaya hai.")
+            try: await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!** Bot stopped.")
             except: pass
 
+    # --- ⚡ 2. FAST GOD MODE PROCESSOR ---
     async def process_god_mode(event):
-        if event.id in sniper.processed_ids_set: return
-        sniper.processed_ids_set.add(event.id)
+        if event.id in sniper.processed_ids: return
+        sniper.processed_ids.append(event.id)
         
         text_content = event.message.message or ""
         if not text_content and not event.message.media: return
@@ -516,43 +437,42 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         replacer_link = bot_db[uid].get('replacer_link')
         replacer_uname = bot_db[uid].get('replacer_username')
         reply_to_id = event.message.reply_to_msg_id
+        timer_sec = bot_db[uid].get('over_timer', 0)
+        custom_over = bot_db[uid].get('over_text', "❌️❌️ OVER ❌️❌️")
         
         sent_msgs_this_event = {}
         
-        async def send_god_dest(d_id, target):
-            try:
-                reply_obj = None
-                if reply_to_id and reply_to_id in sniper.god_msg_map:
-                    dest_reply_id = sniper.god_msg_map[reply_to_id].get(d_id)
-                    if dest_reply_id: reply_obj = dest_reply_id
-                
-                kwargs = {'link_preview': True}
-                if reply_obj: kwargs['reply_to'] = reply_obj
-                if event.message.media: kwargs['file'] = event.message.media
+        # Format HTML Message if replacers exist
+        kwargs = {'link_preview': True}
+        if event.message.media: kwargs['file'] = event.message.media
+        final_text = text_content
 
-                if not replacer_link and not replacer_uname:
-                    kwargs['formatting_entities'] = event.message.entities
-                    sent_msg = await client.send_message(target, text_content, **kwargs)
-                else:
-                    try: msg_html = html.unparse(text_content, event.message.entities)
-                    except: msg_html = text_content
-                    if replacer_link: 
-                        msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
-                        msg_html = re.sub(r'(https?://)?t\.me/joinchat/[a-zA-Z0-9_-]+', replacer_link, msg_html)
-                    if replacer_uname: 
-                        msg_html = safe_replace_username(msg_html, replacer_uname)
-                    kwargs['parse_mode'] = 'html'
-                    sent_msg = await client.send_message(target, msg_html, **kwargs)
-                
-                if sent_msg: return d_id, sent_msg.id
-            except: pass
-            return None
+        if not replacer_link and not replacer_uname:
+            kwargs['formatting_entities'] = event.message.entities
+        else:
+            try: msg_html = html.unparse(text_content, event.message.entities)
+            except: msg_html = text_content
+            if replacer_link: 
+                msg_html = re.sub(r'(https?://)?t\.me/\+[a-zA-Z0-9_-]+', replacer_link, msg_html)
+                msg_html = re.sub(r'(https?://)?t\.me/joinchat/[a-zA-Z0-9_-]+', replacer_link, msg_html)
+            if replacer_uname: 
+                msg_html = safe_replace_username(msg_html, replacer_uname)
+            kwargs['parse_mode'] = 'html'
+            final_text = msg_html
+            
+        async def shoot_god_message(d_id, target):
+            send_kwargs = kwargs.copy()
+            if reply_to_id and reply_to_id in sniper.god_msg_map:
+                dest_reply_id = sniper.god_msg_map[reply_to_id].get(d_id)
+                if dest_reply_id: send_kwargs['reply_to'] = dest_reply_id
+            return d_id, await fast_god_send(client, target, final_text, send_kwargs, timer_sec, custom_over)
 
-        tasks = [send_god_dest(d_id, target) for d_id, target in sniper.destinations.items()]
+        # 🚀 ASYNC GOD FIRE
+        tasks = [shoot_god_message(d_id, target) for d_id, target in sniper.destinations.items()]
         results = await asyncio.gather(*tasks)
         
         for res in results:
-            if res: sent_msgs_this_event[res[0]] = res[1]
+            if res and res[1]: sent_msgs_this_event[res[0]] = res[1]
 
         if sent_msgs_this_event:
             if len(sniper.god_msg_keys) >= 2000:
@@ -560,8 +480,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                 sniper.god_msg_map.pop(old_id, None)
             sniper.god_msg_keys.append(event.id)
             sniper.god_msg_map[event.id] = sent_msgs_this_event
-            bot_db[uid]['stats']['forwarded'] += 1
-            save_bot_data()
 
     @client.on(events.NewMessage())
     async def handler(event):
@@ -577,10 +495,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         else:
             if event.chat_id not in sniper.pinned_chats: return
 
-        # ⚡ ROUTING TO RUSH OR OTHER MODES
-        if sniper.sniper_mode == 'rush':
-            await process_rush_mode(event, is_edit=False)
-        elif sniper.sniper_mode == 'god':
+        if sniper.sniper_mode == 'god':
             await process_god_mode(event)
         else:
             await process_fast_event(event, is_edit=False)
@@ -594,12 +509,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         else:
             if event.chat_id not in sniper.pinned_chats: return
 
-        # ⚡ RUSH MODE EDIT CATCHER ⚡
-        if sniper.sniper_mode == 'rush':
-            if bot_db[uid].get('edit_catcher'):
-                await process_rush_mode(event, is_edit=True)
-            return
-
+        # Edit for God Mode
         if sniper.sniper_mode == 'god':
             if event.id not in sniper.god_msg_map: return
             text_content = event.message.message or ""
@@ -611,7 +521,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     for d_id, dest_msg_id in sniper.god_msg_map[event.id].items():
                         target = sniper.destinations.get(int(d_id))
                         if target:
-                            await client.edit_message(target, dest_msg_id, text=text_content, file=event.message.media, formatting_entities=event.message.entities)
+                            asyncio.create_task(client.edit_message(target, dest_msg_id, text=text_content, file=event.message.media, formatting_entities=event.message.entities))
                 else:
                     try: msg_html = html.unparse(text_content, event.message.entities)
                     except: msg_html = text_content
@@ -623,7 +533,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     
                     for d_id, dest_msg_id in sniper.god_msg_map[event.id].items():
                         target = sniper.destinations.get(int(d_id))
-                        if target: await client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media)
+                        if target: asyncio.create_task(client.edit_message(target, dest_msg_id, text=msg_html, parse_mode='html', file=event.message.media))
             except: pass
             
         elif bot_db[uid].get('edit_catcher'):
@@ -638,9 +548,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             if deleted_id in sniper.god_msg_map:
                 for d_id, dest_msg_id in sniper.god_msg_map[deleted_id].items():
                     target = sniper.destinations.get(int(d_id))
-                    if target:
-                        try: await client.delete_messages(target, dest_msg_id)
-                        except: pass
+                    if target: asyncio.create_task(client.delete_messages(target, dest_msg_id))
 
     try:
         time_left = get_time_left(user_id)
@@ -653,11 +561,6 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             f"✅ **SNIPER ACTIVE!** 🎯\n\n🟢 **Target Mode:** {mode_text}\n🛠 **Forwarding:** `{mode_name} Mode{lines_info}`\n🚀 **Destinations:** `{len(sniper.destinations)}`\n⏳ **Validity:** `{validity_str}`", 
             buttons=get_control_buttons(validity_str, user_id)
         )
-    except: pass
-
-async def auto_over_message(client, target, msg_id, delay, custom_over_text):
-    await asyncio.sleep(delay)
-    try: await client.edit_message(target, msg_id, custom_over_text)
     except: pass
 
 async def auto_resume_snipers():
@@ -720,18 +623,18 @@ async def start_command(event):
             return
         else:
             user_states[user_id] = 'WAITING_KEY'
-            btn_row = get_official_btn_row()
+            btn_row = get_official_btn_single()
             await event.reply(
                 "⚠️ **Aapki purani Key Expire ho chuki hai!**\n\nKripya apni **Nayi License Key (PIN)** yahan bhejein:", 
-                buttons=btn_row if btn_row else None
+                buttons=[btn_row] if btn_row else None
             )
             return
 
     user_states[user_id] = 'WAITING_KEY'
-    btn_row = get_official_btn_row()
+    btn_row = get_official_btn_single()
     await event.reply(
         "🔒 **Ye bot sirf authorized users ke liye hai.**\n\nKripya apni **License Key (PIN)** yahan bhejein:", 
-        buttons=btn_row if btn_row else None
+        buttons=[btn_row] if btn_row else None
     )
 
 @master_bot.on(events.CallbackQuery)
@@ -902,8 +805,7 @@ async def callback_handler(event):
             await event.answer(f"🔑 Key: {info['key']} | ⏳ Left: {format_time_left(get_time_left(user_id))}\n🔐 Special Key: {sp_str}", alert=True)
             
     elif data == "ctl_stats": 
-        fwd_count = bot_db[uid].get('stats', {}).get('forwarded', 0)
-        await event.answer(f"📊 Aapke bot ne ab tak {fwd_count} messages forward kiye hain!", alert=True)
+        await event.answer(f"📊 Live Stats ab Zero-Latency ke liye bypass kar diye gaye hain!", alert=True)
         
     elif data == "ctl_restart":
         if user_id in active_snipers_dict:
@@ -1620,7 +1522,7 @@ async def handle_text(event):
         except Exception as e:
             await event.reply(f"❌ Password Error: {e}")
 
-print("👑 Ultimate Master Bot V2 Initialized Successfully (Local Storage Mode)!")
+print("👑 Ultimate Master Bot V2 Engine Started at ZERO LATENCY!")
 master_bot.start(bot_token=BOT_TOKEN)
 master_bot.loop.create_task(auto_resume_snipers())
 master_bot.run_until_disconnected()
