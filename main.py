@@ -1,7 +1,6 @@
 import asyncio
 import time
 import re
-from collections import deque
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, types, Button
 from telethon.tl.types import MessageEntityCode, MessageEntityPre, PeerChannel, PeerChat
@@ -265,7 +264,7 @@ async def fast_god_send(client, target, text_content, kwargs, timer_sec=0, custo
         return sent_msg.id if sent_msg else None
     except: return None
 
-# --- 🎯 CORE ENGINE CLASS (RAM FOCUSED) ---
+# --- 🎯 CORE ENGINE CLASS (RAM FOCUSED O(1) MEMORY) ---
 class UserSniper:
     def __init__(self, user_id, client, name, source_chat_ids=None, sniper_mode="rush", lines_count=4):
         self.user_id = user_id
@@ -278,14 +277,14 @@ class UserSniper:
         self.is_paused = bot_db[str(user_id)].get('is_paused', False)
         self.sniper_mode = sniper_mode 
         self.lines_count = lines_count
+        self.special_triggered = False
         
-        # 🧠 RAM BASED DEQUES FOR ALL MODES
-        self.processed_ids = deque(maxlen=2000)
-        self.seen_codes = deque(maxlen=2000)
-        self.special_triggered = False 
+        # 🧠 O(1) SPEED RAM CACHE (DICTIONARIES INSTED OF DEQUE)
+        self.processed_ids = {}
+        self.seen_codes = {}
         
         self.god_msg_map = {}
-        self.god_msg_keys = deque(maxlen=2000)
+        self.god_msg_keys = {}
         
     async def update_pinned_loop(self):
         if self.source_chat_ids: return
@@ -333,9 +332,16 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         try: client.remove_event_handler(delete_handler)
         except: pass
 
-    # --- ⚡ 1. FAST EVENT PROCESSOR (NORMAL, LINK, SPECIAL, RUSH) ---
+    # --- ⚡ 1. FAST EVENT PROCESSOR (O(1) MEMORY INCLUDED) ---
     async def process_fast_event(event, is_edit=False):
-        if event.id in sniper.processed_ids: return 
+        # ⚡ God Mode V2: O(1) Speed ID Check
+        if not is_edit:
+            if event.id in sniper.processed_ids: return 
+            sniper.processed_ids[event.id] = True
+            
+            # RAM Lock (Server ko kabhi rukne nahi dega)
+            if len(sniper.processed_ids) > 2000:
+                del sniper.processed_ids[next(iter(sniper.processed_ids))]
             
         if sniper.sniper_mode == "special":
             if not is_special_authorized(user_id):
@@ -351,7 +357,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         text_content = event.message.message or ""
         extracted_codes = []
 
-        # 🧠 Fast Extraction Logic
+        # 🧠 Fast Extraction Logic with O(1) Protection
         if sniper.sniper_mode == "link":
             found = re.findall(r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?(?:#[^\s]*)?', text_content)
             for ent, t in event.message.get_entities_text():
@@ -362,10 +368,15 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             for ent, text in event.message.get_entities_text():
                 if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
                     if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', text, re.IGNORECASE): continue
-                    if text not in extracted_codes: extracted_codes.append(text)
+                    
+                    if text not in sniper.seen_codes: 
+                        extracted_codes.append(text)
+                        sniper.seen_codes[text] = True
+                        if len(sniper.seen_codes) > 5000:
+                            del sniper.seen_codes[next(iter(sniper.seen_codes))]
 
         # 🔗 RAM Based Deep Link Catcher
-        if bot_db[uid].get('link_catcher'):
+        if not extracted_codes and bot_db[uid].get('link_catcher'):
             link_pattern = r'(?:https?://)?(?:t\.me|telegram\.me)/(?:c/(\d+)/(\d+)|([a-zA-Z0-9_]+)/(\d+))'
             for match in re.finditer(link_pattern, text_content):
                 try:
@@ -374,34 +385,48 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     f_msg = await client.get_messages(c_id, ids=m_id)
                     if f_msg:
                         for ent, t in f_msg.get_entities_text():
-                            if isinstance(ent, (MessageEntityCode, MessageEntityPre)) and t not in extracted_codes:
-                                extracted_codes.append(t)
+                            if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
+                                if t not in sniper.seen_codes:
+                                    extracted_codes.append(t)
+                                    sniper.seen_codes[t] = True
+                                    if len(sniper.seen_codes) > 5000:
+                                        del sniper.seen_codes[next(iter(sniper.seen_codes))]
                 except: pass
 
-        final_codes = [c for c in extracted_codes if c not in sniper.seen_codes]
-        if not final_codes: return
-        
-        sniper.processed_ids.append(event.id)
-        for c in final_codes: sniper.seen_codes.append(c)
+        if not extracted_codes: return
 
         messages_to_send = []
+        # --- ⚡ ULTRA-FAST RUSH MODE (O(1) String Formatting) ---
         if sniper.sniper_mode == "rush":
-            num = len(final_codes)
-            lines = [f"{num} Code"]
-            if num == 1: lines.extend([f"`{final_codes[0]}`"] * 3)
+            num = len(extracted_codes)
+            if num == 1:
+                c = extracted_codes[0]
+                final_text = f"1 Code\n`{c}`\n`{c}`\n`{c}`\n`{c}`"
             elif num == 2:
-                for c in final_codes: lines.extend([f"`{c}`", f"`{c}`"])
+                c1, c2 = extracted_codes
+                final_text = f"2 Code\n`{c1}`\n`{c1}`\n\n`{c2}`\n`{c2}`"
             else:
-                for c in final_codes: lines.append(f"`{c}`")
-            messages_to_send.append({'text': "\n".join(lines)})
+                final_lines = [f"{num} Code"]
+                for i, c in enumerate(extracted_codes):
+                    final_lines.extend([f"`{c}`", f"`{c}`"])
+                    if i < num - 1: final_lines.append("")
+                final_text = "\n".join(final_lines)
+                
+            # Direct Header Footer Apply For Rush Mode without loops
+            h_text = bot_db[uid].get('custom_header')
+            f_text = bot_db[uid].get('custom_footer')
+            if h_text: final_text = f"{h_text}\n\n{final_text}"
+            if f_text: final_text = f"{final_text}\n\n{f_text}"
+            
+            messages_to_send.append({'text': final_text})
             
         elif sniper.sniper_mode == "special":
-            body_text = "\n".join([f"`{final_codes[0]}`"] * sniper.lines_count)
+            body_text = "\n".join([f"`{extracted_codes[0]}`"] * sniper.lines_count)
             messages_to_send.append({'text': body_text, 'is_special': True})
             sniper.special_triggered = True
             
         else:
-            for c in final_codes: 
+            for c in extracted_codes: 
                 body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
                 final_text = ""
                 if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
@@ -426,10 +451,12 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             try: await master_bot.send_message(user_id, "🎯 **1st Special Code successfully forwarded!** Bot stopped.")
             except: pass
 
-    # --- ⚡ 2. FAST GOD MODE PROCESSOR ---
+    # --- ⚡ 2. FAST GOD MODE PROCESSOR (O(1) MEMORY INCLUDED) ---
     async def process_god_mode(event):
         if event.id in sniper.processed_ids: return
-        sniper.processed_ids.append(event.id)
+        sniper.processed_ids[event.id] = True
+        if len(sniper.processed_ids) > 2000:
+            del sniper.processed_ids[next(iter(sniper.processed_ids))]
         
         text_content = event.message.message or ""
         if not text_content and not event.message.media: return
@@ -476,9 +503,10 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
         if sent_msgs_this_event:
             if len(sniper.god_msg_keys) >= 2000:
-                old_id = sniper.god_msg_keys.popleft()
+                old_id = next(iter(sniper.god_msg_keys))
+                del sniper.god_msg_keys[old_id]
                 sniper.god_msg_map.pop(old_id, None)
-            sniper.god_msg_keys.append(event.id)
+            sniper.god_msg_keys[event.id] = True
             sniper.god_msg_map[event.id] = sent_msgs_this_event
 
     @client.on(events.NewMessage())
