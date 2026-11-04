@@ -279,7 +279,7 @@ class UserSniper:
         self.lines_count = lines_count
         self.special_triggered = False
         
-        # 🧠 O(1) SPEED RAM CACHE (DICTIONARIES INSTED OF DEQUE)
+        # 🧠 O(1) SPEED RAM CACHE
         self.processed_ids = {}
         self.seen_codes = {}
         
@@ -308,7 +308,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
     sniper = UserSniper(user_id, client, name, source_chat_ids, sniper_mode, lines_count)
     
-    # 🎯 RAM CACHING DESTINATIONS (NO ID FETCH LATENCY)
+    # 🎯 RAM CACHING DESTINATIONS
     for d_chat in dest_chats:
         try:
             target_entity = await client.get_entity(int(d_chat))
@@ -334,7 +334,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
 
     # --- ⚡ 1. FAST EVENT PROCESSOR (O(1) MEMORY INCLUDED) ---
     async def process_fast_event(event, is_edit=False):
-        # ⚡ God Mode V2: O(1) Speed ID Check
+        # ⚡ O(1) Speed ID Check
         if not is_edit:
             if event.id in sniper.processed_ids: return 
             sniper.processed_ids[event.id] = True
@@ -357,25 +357,27 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         text_content = event.message.message or ""
         extracted_codes = []
 
-        # 🧠 Fast Extraction Logic with O(1) Protection
+        # 🧠 Fast Extraction Logic with O(1) Protection & Strip (Space Fix)
         if sniper.sniper_mode == "link":
             found = re.findall(r'(?:\b|https?://)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?(?:#[^\s]*)?', text_content)
             for ent, t in event.message.get_entities_text():
-                if isinstance(ent, (types.MessageEntityUrl, types.MessageEntityTextUrl)) and t not in found:
-                    found.append(t)
+                clean_t = t.strip()
+                if isinstance(ent, (types.MessageEntityUrl, types.MessageEntityTextUrl)) and clean_t not in found:
+                    found.append(clean_t)
             extracted_codes.extend(found)
         else:
             for ent, text in event.message.get_entities_text():
                 if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                    if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', text, re.IGNORECASE): continue
+                    clean_text = text.strip()
+                    if re.search(r'(?:https?://)?(?:t\.me|telegram\.me)/(?:joinchat/|\+|c/)', clean_text, re.IGNORECASE): continue
                     
-                    if text not in sniper.seen_codes: 
-                        extracted_codes.append(text)
-                        sniper.seen_codes[text] = True
+                    if clean_text and clean_text not in sniper.seen_codes: 
+                        extracted_codes.append(clean_text)
+                        sniper.seen_codes[clean_text] = True
                         if len(sniper.seen_codes) > 5000:
                             del sniper.seen_codes[next(iter(sniper.seen_codes))]
 
-        # 🔗 RAM Based Deep Link Catcher
+        # 🔗 RAM Based Deep Link Catcher (Space Fix)
         if not extracted_codes and bot_db[uid].get('link_catcher'):
             link_pattern = r'(?:https?://)?(?:t\.me|telegram\.me)/(?:c/(\d+)/(\d+)|([a-zA-Z0-9_]+)/(\d+))'
             for match in re.finditer(link_pattern, text_content):
@@ -386,9 +388,10 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     if f_msg:
                         for ent, t in f_msg.get_entities_text():
                             if isinstance(ent, (MessageEntityCode, MessageEntityPre)):
-                                if t not in sniper.seen_codes:
-                                    extracted_codes.append(t)
-                                    sniper.seen_codes[t] = True
+                                clean_t = t.strip()
+                                if clean_t and clean_t not in sniper.seen_codes:
+                                    extracted_codes.append(clean_t)
+                                    sniper.seen_codes[clean_t] = True
                                     if len(sniper.seen_codes) > 5000:
                                         del sniper.seen_codes[next(iter(sniper.seen_codes))]
                 except: pass
@@ -396,7 +399,7 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
         if not extracted_codes: return
 
         messages_to_send = []
-        # --- ⚡ ULTRA-FAST RUSH MODE (O(1) String Formatting) ---
+        # --- ⚡ ULTRA-FAST RUSH MODE (No Header/Footer for Rush Mode) ---
         if sniper.sniper_mode == "rush":
             num = len(extracted_codes)
             if num == 1:
@@ -411,13 +414,8 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
                     final_lines.extend([f"`{c}`", f"`{c}`"])
                     if i < num - 1: final_lines.append("")
                 final_text = "\n".join(final_lines)
-                
-            # Direct Header Footer Apply For Rush Mode without loops
-            h_text = bot_db[uid].get('custom_header')
-            f_text = bot_db[uid].get('custom_footer')
-            if h_text: final_text = f"{h_text}\n\n{final_text}"
-            if f_text: final_text = f"{final_text}\n\n{f_text}"
             
+            # Rush Mode ke liye header/footer bypass kar diya
             messages_to_send.append({'text': final_text})
             
         elif sniper.sniper_mode == "special":
@@ -425,10 +423,11 @@ async def start_sniper_for_user(user_id, client, dest_chats, name, source_chat_i
             messages_to_send.append({'text': body_text, 'is_special': True})
             sniper.special_triggered = True
             
-        else:
+        else: # Normal Mode
             for c in extracted_codes: 
                 body_text = "\n".join([f"`{c}`"] * sniper.lines_count)
                 final_text = ""
+                # Normal Mode me Header/Footer add hoga
                 if bot_db[uid].get('custom_header'): final_text += bot_db[uid]['custom_header'] + "\n\n"
                 final_text += body_text
                 if bot_db[uid].get('custom_footer'): final_text += "\n\n" + bot_db[uid]['custom_footer']
@@ -629,7 +628,7 @@ async def start_command(event):
             if user_id in active_snipers_dict:
                 sniper = active_snipers_dict[user_id]
                 status_txt = "🟢 **BOT IS ON**" if not sniper.is_paused else "🟡 **BOT IS PAUSED**"
-                await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke liye niche buttons use karein:", buttons=get_control_buttons(validity_str, user_id))
+                await event.reply(f"{status_txt}\n\n⏳ **Validity:** `{validity_str}`\nApna bot control karne ke niche buttons use karein:", buttons=get_control_buttons(validity_str, user_id))
                 return
 
             session_str = load_user_session(user_id)
